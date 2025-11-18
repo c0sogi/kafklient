@@ -236,6 +236,16 @@ class KafkaBaseClient(ABC):
             )
             return self._consumer
 
+    @property
+    async def consumer(self) -> AIOKafkaConsumer:
+        consumer = await self._ensure_consumer_started()
+        return consumer
+
+    @property
+    async def producer(self) -> AIOKafkaProducer:
+        producer = await self._ensure_producer_started()
+        return producer
+
     # assign/auto-expand are removed in subscribe mode
 
     async def _maybe_commit(self) -> None:
@@ -285,7 +295,7 @@ class KafkaBaseClient(ABC):
                         except Exception:
                             pass
                 except Exception as ex:
-                    logger.exception(
+                    logger.debug(
                         f"Parser failed (topic={topic}, out={getattr(spec['type'], '__name__', spec['type'])}): {ex}"
                     )
 

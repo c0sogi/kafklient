@@ -12,7 +12,9 @@ from aiokafka import (  # pyright: ignore[reportMissingTypeStubs]
     AIOKafkaProducer,
     ConsumerRecord,
 )
-from aiokafka.abc import ConsumerRebalanceListener  # pyright: ignore[reportMissingTypeStubs]
+from aiokafka.abc import (  # pyright: ignore[reportMissingTypeStubs]
+    ConsumerRebalanceListener,
+)
 from aiokafka.structs import TopicPartition  # pyright: ignore[reportMissingTypeStubs]
 from beartype.door import is_bearable
 from loguru import logger
