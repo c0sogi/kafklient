@@ -3,94 +3,94 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "aiokafka"
-version = "0.12.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "async-timeout" },
-    { name = "packaging" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/65/ca/42a962033e6a7926dcb789168bce81d0181ef4ddabce454d830b7e62370e/aiokafka-0.12.0.tar.gz", hash = "sha256:62423895b866f95b5ed8d88335295a37cc5403af64cb7cb0e234f88adc2dff94", size = 564955, upload-time = "2024-10-26T20:53:11.227Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/d4/baf1b2389995c6c312834792329a1993a303ff703ac023250ff977c5923b/aiokafka-0.12.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:b01947553ff1120fa1cb1a05f2c3e5aa47a5378c720bafd09e6630ba18af02aa", size = 375031, upload-time = "2024-10-26T20:52:40.104Z" },
-    { url = "https://files.pythonhosted.org/packages/54/ac/653070a4add8beea7aa8209ab396de87c7b4f9628fff15efcdbaea40e973/aiokafka-0.12.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e3c8ec1c0606fa645462c7353dc3e4119cade20c4656efa2031682ffaad361c0", size = 370619, upload-time = "2024-10-26T20:52:41.877Z" },
-    { url = "https://files.pythonhosted.org/packages/80/f2/0ddaaa11876ab78e0f3b30f272c62eea70870e1a52a5afe985c7c1d098e1/aiokafka-0.12.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:577c1c48b240e9eba57b3d2d806fb3d023a575334fc3953f063179170cc8964f", size = 1192363, upload-time = "2024-10-26T20:52:44.028Z" },
-    { url = "https://files.pythonhosted.org/packages/ae/48/541ccece0e593e24ee371dec0c33c23718bc010b04e998693e4c19091258/aiokafka-0.12.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d7b815b2e5fed9912f1231be6196547a367b9eb3380b487ff5942f0c73a3fb5c", size = 1213231, upload-time = "2024-10-26T20:52:46.028Z" },
-    { url = "https://files.pythonhosted.org/packages/99/3f/75bd0faa77dfecce34dd1c0edd317b608518b096809736f9987dd61f4cec/aiokafka-0.12.0-cp312-cp312-win32.whl", hash = "sha256:5a907abcdf02430df0829ac80f25b8bb849630300fa01365c76e0ae49306f512", size = 347752, upload-time = "2024-10-26T20:52:47.327Z" },
-    { url = "https://files.pythonhosted.org/packages/ef/97/e2513a0c10585e51d4d9b42c9dd5f5ab15dfe150620a4893a2c6c20f0f4a/aiokafka-0.12.0-cp312-cp312-win_amd64.whl", hash = "sha256:fdbd69ec70eea4a8dfaa5c35ff4852e90e1277fcc426b9380f0b499b77f13b16", size = 366068, upload-time = "2024-10-26T20:52:49.132Z" },
-    { url = "https://files.pythonhosted.org/packages/30/84/f1f7e603cd07e877520b5a1e48e006cbc1fe448806cabbaa98aa732f530d/aiokafka-0.12.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:f9e8ab97b935ca681a5f28cf22cf2b5112be86728876b3ec07e4ed5fc6c21f2d", size = 370960, upload-time = "2024-10-26T20:52:51.235Z" },
-    { url = "https://files.pythonhosted.org/packages/d7/c7/5237b3687198c2129c0bafa4a96cf8ae3883e20cc860125bafe16af3778e/aiokafka-0.12.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ed991c120fe19fd9439f564201dd746c4839700ef270dd4c3ee6d4895f64fe83", size = 366597, upload-time = "2024-10-26T20:52:52.539Z" },
-    { url = "https://files.pythonhosted.org/packages/6b/67/0154551292ec1c977e5def178ae5c947773e921aefb6877971e7fdf1942e/aiokafka-0.12.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2c01abf9787b1c3f3af779ad8e76d5b74903f590593bc26f33ed48750503e7f7", size = 1152905, upload-time = "2024-10-26T20:52:54.089Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/20/69f913a76916e94c4e783dc7d0d05a25c384b25faec33e121062c62411fe/aiokafka-0.12.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:08c84b3894d97fd02fcc8886f394000d0f5ce771fab5c498ea2b0dd2f6b46d5b", size = 1171893, upload-time = "2024-10-26T20:52:56.14Z" },
-    { url = "https://files.pythonhosted.org/packages/16/65/41cc1b19e7dea623ef58f3bf1e2720377c5757a76d9799d53a1b5fc39255/aiokafka-0.12.0-cp313-cp313-win32.whl", hash = "sha256:63875fed922c8c7cf470d9b2a82e1b76b4a1baf2ae62e07486cf516fd09ff8f2", size = 345933, upload-time = "2024-10-26T20:52:57.518Z" },
-    { url = "https://files.pythonhosted.org/packages/bf/0d/4cb57231ff650a01123a09075bf098d8fdaf94b15a1a58465066b2251e8b/aiokafka-0.12.0-cp313-cp313-win_amd64.whl", hash = "sha256:bdc0a83eb386d2384325d6571f8ef65b4cfa205f8d1c16d7863e8d10cacd995a", size = 363194, upload-time = "2024-10-26T20:52:59.434Z" },
-]
-
-[[package]]
-name = "async-timeout"
-version = "5.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a5/ae/136395dfbfe00dfc94da3f3e136d0b13f394cba8f4841120e34226265780/async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3", size = 9274, upload-time = "2024-11-06T16:41:39.6Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/ba/e2081de779ca30d473f21f5b30e0e737c438205440784c7dfc81efc2b029/async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c", size = 6233, upload-time = "2024-11-06T16:41:37.9Z" },
-]
-
-[[package]]
 name = "beartype"
-version = "0.22.2"
+version = "0.22.6"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/04/96/43ed27f27127155f24f5cf85df0c27fd2ac2ab67d94cecc8f76933f91679/beartype-0.22.2.tar.gz", hash = "sha256:ff3a7df26af8d15fa87f97934f0f6d41bbdadca971c410819104998dd26013d2", size = 1574491, upload-time = "2025-10-04T06:37:56.451Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/e2/105ceb1704cb80fe4ab3872529ab7b6f365cf7c74f725e6132d0efcf1560/beartype-0.22.6.tar.gz", hash = "sha256:97fbda69c20b48c5780ac2ca60ce3c1bb9af29b3a1a0216898ffabdd523e48f4", size = 1588975, upload-time = "2025-11-20T04:47:14.736Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/2a/a4773109619010192e72f48e95165b14790413a51f513c879c8d63f67e17/beartype-0.22.2-py3-none-any.whl", hash = "sha256:12077afe3528eba5c5b801f816712f7ff06f6da5509994c79561e29b48bcedb8", size = 1317280, upload-time = "2025-10-04T06:37:53.99Z" },
+    { url = "https://files.pythonhosted.org/packages/98/c9/ceecc71fe2c9495a1d8e08d44f5f31f5bca1350d5b2e27a4b6265424f59e/beartype-0.22.6-py3-none-any.whl", hash = "sha256:0584bc46a2ea2a871509679278cda992eadde676c01356ab0ac77421f3c9a093", size = 1324807, upload-time = "2025-11-20T04:47:11.837Z" },
 ]
 
 [[package]]
-name = "colorama"
-version = "0.4.6"
+name = "confluent-kafka"
+version = "2.12.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c2/cd/18ffb1d2a7e189fee50b4a9597255e1078580d679daf913c25d0d13c3f88/confluent_kafka-2.12.2.tar.gz", hash = "sha256:5a50bfcd24f9dcf34b986f837f80126a71087364d44fcb8b45e8e74080fb6e98", size = 250423, upload-time = "2025-11-07T15:42:32.392Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/89/f5b31c882927b64f548ca9ceca6a4d60f29f60086fd229838df6900c7fb1/confluent_kafka-2.12.2-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:2b978c407de4f63cf06e659afaae4c14919e665c80e3a65ff3479bb4d42c1ef4", size = 3598735, upload-time = "2025-11-07T15:41:43.326Z" },
+    { url = "https://files.pythonhosted.org/packages/51/9c/51c278db2e37c950c325ee362ed78006ca6e007d38c39f3c35c20e80bcf3/confluent_kafka-2.12.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:bd9ebfd7b47105d1f3981944d47307c10c9fd1fd0b2044904ccdc7c2b8adb75a", size = 3158090, upload-time = "2025-11-07T15:41:44.942Z" },
+    { url = "https://files.pythonhosted.org/packages/63/ab/3d9ff1d6efdd5cc577f92dc24debfebf08dcce46d2fa0dd7cd7094a9cfc8/confluent_kafka-2.12.2-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:d35f5c5b84f6803eb7e974802577aa3a317bd9e44a438c7bd4074b56098467f2", size = 3695809, upload-time = "2025-11-07T15:41:46.552Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/cc/41b8f1bf6bd1ae978baf0928f79913493fbb036a53174d5658212c58cca5/confluent_kafka-2.12.2-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:f189203de0200b986e2243215e052e787d8a426d92df815c440b76150da5b194", size = 3947426, upload-time = "2025-11-07T15:41:48.452Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/eb/8e0b6d6f26eff89549ee6d8729ff011ee040659907a48af9e1c7bfbf0324/confluent_kafka-2.12.2-cp312-cp312-win_amd64.whl", hash = "sha256:90bff1e56f1c382583dafb316bb5171e10659d3eaffcb477f28fa13a6f36fe04", size = 4068381, upload-time = "2025-11-07T15:41:50.054Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/28/b209303f607288c10fcfa5521bbaa56a6e298c088d5ac658b811ff77555d/confluent_kafka-2.12.2-cp313-cp313-macosx_13_0_arm64.whl", hash = "sha256:e888667c607741af5e4b36014d215c4ad2f214646e3da777505e4cf383ac5375", size = 3163179, upload-time = "2025-11-07T15:41:51.611Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/4c/fee4d5c0f5e907bfbb48d3da329b66ede8c7aa0a3af42a269cee5c3e44d9/confluent_kafka-2.12.2-cp313-cp313-macosx_13_0_x86_64.whl", hash = "sha256:adc98ecfbb2a41a234c72043c0ca46c941d5da61900d998f14f29a30baa2e688", size = 3602455, upload-time = "2025-11-07T15:41:53.216Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/c6/fe09a0683ef0bcf2c3b8df3b6827f1b4a95288c02bac1d93a154cddfb21c/confluent_kafka-2.12.2-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:d0abde08fc133cfe6667226472518c6afbb80e083090c441c4ae4cddcd8ed921", size = 3696185, upload-time = "2025-11-07T15:41:54.633Z" },
+    { url = "https://files.pythonhosted.org/packages/77/ed/23ae84c4ef04a38de36033a760b352fbbd51edee9e81d5c9f7c9eba18f09/confluent_kafka-2.12.2-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:b3065064a86b4494c8c94eff9968845461918a2bc89e5a800a2920f722ed2cb1", size = 3947823, upload-time = "2025-11-07T15:41:56.343Z" },
+    { url = "https://files.pythonhosted.org/packages/96/45/755cfc775d9f42ebd50507ab18ec2459ea06e0fc24be4f0829616c10539a/confluent_kafka-2.12.2-cp313-cp313-win_amd64.whl", hash = "sha256:26b2291694a300b7ff00b46eda835a06b124b4878527d32277d42ca39ee95dd9", size = 4128056, upload-time = "2025-11-07T15:41:57.787Z" },
+    { url = "https://files.pythonhosted.org/packages/50/76/5b093946777976ee7acf46cac73b9f5a648ad81c0b8b2d64684f0ac84962/confluent_kafka-2.12.2-cp314-cp314-macosx_13_0_arm64.whl", hash = "sha256:0101be4b6037ad5a49f71c749bfd9f24e82607774f5fb4424c4dee6bf39a302d", size = 3162999, upload-time = "2025-11-07T15:41:59.645Z" },
+    { url = "https://files.pythonhosted.org/packages/08/c4/67566514acb7ccdf77dd07633c9e47c52f9c087c1676faa6661147c70acc/confluent_kafka-2.12.2-cp314-cp314-macosx_13_0_x86_64.whl", hash = "sha256:27cc33a0c47f167db81b4f46d9e1c59582d9bfd8b3c21129a2ee400f5c93844e", size = 3602261, upload-time = "2025-11-07T15:42:01.571Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/3c/036b78024d93f293f1f09efe093ecc63a8c33d1f202e7126c56bbd3adb79/confluent_kafka-2.12.2-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:38d23cf3f428451fc14c18aa53f5f3f1a37c7d89c44bfaf2862b3d6a5068e45c", size = 3696018, upload-time = "2025-11-07T15:42:03.147Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/f0/2fa9456bdad9585360df5dc3089a70cc03988c9542667a1db123e618929f/confluent_kafka-2.12.2-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:eed1b0e540204c52d0ab40d621c371f52044a788b542f6e28a7756fd8f7a1029", size = 3947575, upload-time = "2025-11-07T15:42:04.727Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/22/ceb0ded4518f58805eff102d6c712809ae61dc0d6cfebcd4dba9246575ff/confluent_kafka-2.12.2-cp314-cp314-win_amd64.whl", hash = "sha256:ef411221bfdaffae944156826965b9a08777a5dff66d765a23108f7d6774706f", size = 4245477, upload-time = "2025-11-07T15:42:06.43Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/d4/fa67b636df3550269e0720416ff9275783c3c5ddb83e7b366518a68501fd/confluent_kafka-2.12.2-cp314-cp314t-macosx_13_0_arm64.whl", hash = "sha256:d04f69f6c269ccf6ec1a2ec327edf977a06e790f631ede18511093c1fe598fef", size = 3161636, upload-time = "2025-11-07T15:42:07.938Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/25/ce8a5d5fbcda376cb55763a399cfec345a50d6e8bde12e135a05f3b6bc37/confluent_kafka-2.12.2-cp314-cp314t-macosx_13_0_x86_64.whl", hash = "sha256:01a0429cac8fe38db49ebb9bda335b0c77f14455da72ccf351d49a51c1bd00a5", size = 3600121, upload-time = "2025-11-07T15:42:09.407Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/91/87f15f79b1b2ca2debf4095e886b6f2d6d9071b30c2ef9d5d6414761d9bb/confluent_kafka-2.12.2-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:82ec5302cf7c9ea06d556ed8e8ea8422d2a60035b607d64579ca63663276fe9b", size = 3694893, upload-time = "2025-11-07T15:42:11.051Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/20/e5d739aa776f4e92ab7a2c58a5250881352f8f0e0270aad0309c48ce33bb/confluent_kafka-2.12.2-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:de9dece5803e6b58d8c101cbceb90fa55ca96e0a5f40f10483a4c8f5f4027a69", size = 3946237, upload-time = "2025-11-07T15:42:14.147Z" },
 ]
 
 [[package]]
-name = "loguru"
-version = "0.7.3"
-source = { registry = "https://pypi.org/simple" }
+name = "kafklient"
+version = "0.1.7"
+source = { editable = "." }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "win32-setctime", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c", size = 61595, upload-time = "2024-12-06T11:20:54.538Z" },
-]
-
-[[package]]
-name = "packaging"
-version = "25.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a1/d4/1fc4078c65507b51b96ca8f8c3ba19e6a61c8253c72794544580a7b6c24d/packaging-25.0.tar.gz", hash = "sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f", size = 165727, upload-time = "2025-04-19T11:48:59.673Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484", size = 66469, upload-time = "2025-04-19T11:48:57.875Z" },
-]
-
-[[package]]
-name = "sdml-kafka-client"
-version = "0.1.6"
-source = { virtual = "." }
-dependencies = [
-    { name = "aiokafka" },
     { name = "beartype" },
-    { name = "loguru" },
+    { name = "confluent-kafka" },
+    { name = "types-confluent-kafka" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pyright" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "aiokafka", specifier = ">=0.12.0" },
-    { name = "beartype", specifier = ">=0.22.2" },
-    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "beartype", specifier = ">=0.22.6" },
+    { name = "confluent-kafka", specifier = ">=2.6.0" },
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
+    { name = "types-confluent-kafka", specifier = ">=1.4.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "nodeenv"
+version = "1.9.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/16/fc88b08840de0e0a72a2f9d8c6bae36be573e475a6326ae854bcc549fc45/nodeenv-1.9.1.tar.gz", hash = "sha256:6ec12890a2dab7946721edbfbcd91f3319c6ccc9aec47be7c7e6b7011ee6645f", size = 47437, upload-time = "2024-06-04T18:44:11.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/1d/1b658dbd2b9fa9c4c9f32accbfc0205d532c8c6194dc0f2a4c0428e7128a/nodeenv-1.9.1-py2.py3-none-any.whl", hash = "sha256:ba11c9782d29c27c70ffbdda2d7415098754709be8a7056d79a737cd901155c9", size = 22314, upload-time = "2024-06-04T18:44:08.352Z" },
+]
+
+[[package]]
+name = "pyright"
+version = "1.1.407"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nodeenv" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/1b/0aa08ee42948b61745ac5b5b5ccaec4669e8884b53d31c8ec20b2fcd6b6f/pyright-1.1.407.tar.gz", hash = "sha256:099674dba5c10489832d4a4b2d302636152a9a42d317986c38474c76fe562262", size = 4122872, upload-time = "2025-10-24T23:17:15.145Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/93/b69052907d032b00c40cb656d21438ec00b3a471733de137a3f65a49a0a0/pyright-1.1.407-py3-none-any.whl", hash = "sha256:6dd419f54fcc13f03b52285796d65e639786373f433e243f8b94cf93a7444d21", size = 5997008, upload-time = "2025-10-24T23:17:13.159Z" },
+]
+
+[[package]]
+name = "types-confluent-kafka"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/04/b7b185ecb77b9f4eb393465323271c73db421e24177a0551c215318701d1/types_confluent_kafka-1.4.0.tar.gz", hash = "sha256:95c1e1325be480950e0f0dc6616ef7a72094b1f4947608343a17b14ce8b972b5", size = 22960, upload-time = "2025-11-02T20:53:12.476Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/32/c241c174bab31367a0dab68a450bf9b09ae3057c9bbcb9f740dbc04d988f/types_confluent_kafka-1.4.0-py3-none-any.whl", hash = "sha256:9db22207778bb1a05cb80faf3f364086aa2c7ee9a2cf3b89e1df1f56951105c1", size = 35683, upload-time = "2025-11-02T20:53:11.271Z" },
 ]
 
 [[package]]
@@ -100,13 +100,4 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/72/94/1a15dd82efb362ac84269196e94cf00f187f7ed21c242792a923cdb1c61f/typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466", size = 109391, upload-time = "2025-08-25T13:49:26.313Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548", size = 44614, upload-time = "2025-08-25T13:49:24.86Z" },
-]
-
-[[package]]
-name = "win32-setctime"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b3/8f/705086c9d734d3b663af0e9bb3d4de6578d08f46b1b101c2442fd9aecaa2/win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0", size = 4867, upload-time = "2024-12-07T15:28:28.314Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/07/c6fe3ad3e685340704d314d765b7912993bcb8dc198f0e7a89382d37974b/win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390", size = 4083, upload-time = "2024-12-07T15:28:26.465Z" },
 ]

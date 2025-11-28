@@ -1,43 +1,27 @@
 import asyncio
 import contextlib
-from typing import (
-    Callable,
-    Generic,
-    NamedTuple,
-    Optional,
-    Self,
-    Type,
-    TypedDict,
-    TypeVar,
-)
+from typing import Generic, NamedTuple, Optional, Self, Type
 
-from aiokafka import ConsumerRecord  # pyright: ignore[reportMissingTypeStubs]
+from .._logging import get_logger
+from ..types import T_Co
 
-T = TypeVar("T", covariant=True)
+logger = get_logger(__name__)
 
 
-class ParserSpec(TypedDict, Generic[T]):
-    """Specify the parser and the range of Kafka input (consume) in one go"""
-
-    topics: list[str]
-    type: Type[T]
-    parser: Callable[[ConsumerRecord[bytes, bytes]], T]
+class Waiter(NamedTuple, Generic[T_Co]):
+    future: asyncio.Future[T_Co]
+    expect_type: Optional[Type[T_Co]]
 
 
-class Waiter(NamedTuple, Generic[T]):
-    future: asyncio.Future[T]
-    expect_type: Optional[Type[T]]
-
-
-class TypeStream(Generic[T]):
-    def __init__(self, q: asyncio.Queue[T], event: asyncio.Event) -> None:
+class TypeStream(Generic[T_Co]):
+    def __init__(self, q: asyncio.Queue[T_Co], event: asyncio.Event) -> None:
         self._q = q
         self._event = event
 
     def __aiter__(self) -> Self:
         return self
 
-    async def __anext__(self) -> T:
+    async def __anext__(self) -> T_Co:
         # If the event is set, stop the iteration
         if self._event.is_set():
             raise StopAsyncIteration
@@ -70,8 +54,3 @@ class TypeStream(Generic[T]):
                     t.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await t
-
-
-class AutoCommitConfig(TypedDict):
-    every: int | None
-    interval_s: float | None

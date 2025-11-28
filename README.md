@@ -1,7 +1,7 @@
-sdml-kafka-client
-==================
+kafklient
+=========
 
-Async Kafka client utilities for SDML built on aiokafka.
+Async Kafka client utilities for SDML built on confluent_kafka with thread-based async wrappers.
 
 What's inside
 -------------
@@ -13,7 +13,7 @@ Requirements
 ------------
 - Python >= 3.12
 - Kafka cluster reachable from your app
-- aiokafka >= 0.12.0
+- confluent-kafka >= 2.6.0
 
 Install
 -------
@@ -34,10 +34,10 @@ ParserSpec
 You declare which topics a client parses and how to parse them.
 
 ```python
-from sdml.kafka_client.types import ParserSpec
-from aiokafka import ConsumerRecord
+from kafklient.types import ParserSpec
+from confluent_kafka import Message
 
-def parse_json(rec: ConsumerRecord[bytes, bytes]) -> dict:
+def parse_json(rec: Message) -> dict:
     import json
     return json.loads(rec.value or b"{}")
 
@@ -52,8 +52,9 @@ KafkaListener quickstart
 ------------------------
 ```python
 import asyncio
-from sdml.kafka_client.clients import KafkaListener
-from sdml.kafka_client.types import ParserSpec
+from kafklient.clients import KafkaListener
+from kafklient.types import ParserSpec
+from confluent_kafka import Consumer
 
 specs: list[ParserSpec[dict]] = [
     {
@@ -66,10 +67,12 @@ specs: list[ParserSpec[dict]] = [
 listener = KafkaListener(
     parsers=specs,
     auto_commit={"every": 100, "interval_s": 5.0},
-    consumer_factory=lambda: __import__("aiokafka").AIOKafkaConsumer(
-        bootstrap_servers="127.0.0.1:9092",
-        group_id="listener",              # required
-        auto_offset_reset="latest",
+    consumer_factory=lambda: Consumer(
+        {
+            "bootstrap.servers": "127.0.0.1:9092",
+            "group.id": "listener",              # required
+            "auto.offset.reset": "latest",
+        }
     ),
 )
 
@@ -86,19 +89,21 @@ KafkaRPC quickstart
 -------------------
 ```python
 import asyncio
-from sdml.kafka_client.clients import KafkaRPC
-from sdml.kafka_client.types import ParserSpec
-from aiokafka import ConsumerRecord
+from kafklient.clients import KafkaRPC
+from kafklient.types import ParserSpec
+from confluent_kafka import Consumer, Message
 
-def parse_reply(rec: ConsumerRecord[bytes, bytes]) -> bytes:
+def parse_reply(rec: Message) -> bytes:
     return rec.value or b""
 
 rpc = KafkaRPC(
     parsers=[{"topics": ["reply"], "type": bytes, "parser": parse_reply}],
-    consumer_factory=lambda: __import__("aiokafka").AIOKafkaConsumer(
-        bootstrap_servers="127.0.0.1:9092",
-        group_id="rpc-client-unique",     # must be unique per requester instance
-        auto_offset_reset="latest",
+    consumer_factory=lambda: Consumer(
+        {
+            "bootstrap.servers": "127.0.0.1:9092",
+            "group.id": "rpc-client-unique",     # must be unique per requester instance
+            "auto.offset.reset": "latest",
+        }
     ),
 )
 
@@ -147,6 +152,13 @@ Correlation IDs
 - `KafkaBaseClient` extracts correlation IDs from headers (`request_id`, `correlation_id`, `x-correlation-id`) or from the key when present.
 - `KafkaRPC.request` can propagate the correlation ID in key and/or a header you choose (default header: `request_id`).
 
+Thread-based async implementation
+---------------------------------
+This library uses sync `Consumer` and `Producer` from confluent-kafka, wrapped with `asyncio.to_thread()` to provide a non-blocking async API. This approach:
+- Avoids blocking the event loop during Kafka operations
+- Provides stable, production-ready Kafka client behavior
+- Works with all existing confluent-kafka features and configurations
+
 Production notes
 ----------------
 - Always set explicit `group_id` in your provided `consumer_factory`.
@@ -164,5 +176,4 @@ API reference (selected)
 License
 -------
 MIT
-
 

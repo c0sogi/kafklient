@@ -1,7 +1,24 @@
 [project]
-name = "sdml-kafka-client"
-version = "0.1.6"
-description = "Kafka client for SDML"
+name = "kafklient"
+version = "0.2.0"
+description = "Async Kafka helpers built on confluent_kafka.experimental.aio."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["aiokafka>=0.12.0", "beartype>=0.22.2", "loguru>=0.7.3"]
+dependencies = [
+    "confluent-kafka>=2.6.0",
+    "beartype>=0.22.6",
+    "types-confluent-kafka>=1.4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pyright>=1.1.407"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+
+[tool.uv]
+package = true
+
+[project.scripts]
+kafklient-benchmark = "kafklient.tests.benchmark:main"
+kafklient-test = "kafklient.tests.__main__:main"

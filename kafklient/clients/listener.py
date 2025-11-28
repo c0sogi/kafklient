@@ -1,48 +1,48 @@
 import asyncio
 import uuid
-from dataclasses import InitVar, dataclass
-from typing import Callable, Optional, Type, TypeVar, cast
+from dataclasses import InitVar, dataclass, field
+from typing import Callable, Optional, Type, cast
 
-from aiokafka import (  # pyright: ignore[reportMissingTypeStubs]
-    AIOKafkaConsumer,
-    ConsumerRecord,
-)
-
-from ..types import T, TypeStream
+from .._logging import get_logger
+from ..types import T_Co
+from ..types.backend import Consumer, Message
+from ..utils.task import TypeStream
 from .base_client import KafkaBaseClient
 
-V = TypeVar("V", covariant=True)
+logger = get_logger(__name__)
 
 
 @dataclass
 class KafkaListener(KafkaBaseClient):
     """A Kafka listener that subscribes to topics and returns a stream of objects"""
 
-    consumer_factory: InitVar[Callable[[], AIOKafkaConsumer]] = (
-        lambda: AIOKafkaConsumer(
-            bootstrap_servers="127.0.0.1:9092",
-            group_id=f"listener-{uuid.uuid4().hex}",
-            auto_offset_reset="latest",
-        )
+    consumer_factory: InitVar[Callable[[], Consumer]] = lambda: Consumer({
+        "bootstrap.servers": "127.0.0.1:9092",
+        "group.id": f"listener-{uuid.uuid4().hex}",
+        "auto.offset.reset": "latest",
+    })
+    _subscriptions: dict[Type[object], tuple[asyncio.Queue[object], asyncio.Event]] = field(
+        default_factory=dict, init=False, repr=False
     )
 
-    def __post_init__(self, consumer_factory: Callable[[], AIOKafkaConsumer]) -> None:
-        super().__post_init__()
+    def __post_init__(
+        self,
+        corr_from_record: Optional[Callable[[Message, Optional[object]], Optional[bytes]]],
+        consumer_factory: Callable[[], Consumer],
+    ) -> None:
+        super().__post_init__(corr_from_record)
         self._consumer_factory = consumer_factory
-        self._subscriptions: dict[
-            Type[object], tuple[asyncio.Queue[object], asyncio.Event]
-        ] = {}
 
     async def subscribe(
         self,
-        tp: Type[T],
+        tp: Type[T_Co],
         *,
         queue_maxsize: int = 0,
         fresh: bool = False,
-    ) -> TypeStream[T]:
+    ) -> TypeStream[T_Co]:
         if self._closed:
             await self.start()
-        await self._ensure_consumer_started()
+        await self.consumer
         if fresh or tp not in self._subscriptions:
             # Replace with a completely new queue/event
             self._subscriptions[tp] = (
@@ -50,11 +50,11 @@ class KafkaListener(KafkaBaseClient):
                 asyncio.Event(),
             )
         q, event = self._subscriptions[tp]
-        return TypeStream[T](cast(asyncio.Queue[T], q), event)
+        return TypeStream[T_Co](cast(asyncio.Queue[T_Co], q), event)
 
     async def _on_record(
         self,
-        record: ConsumerRecord[bytes, bytes],
+        record: Message,
         parsed_candidates: list[tuple[object, Type[object]]],
         cid: Optional[bytes],
     ) -> None:
