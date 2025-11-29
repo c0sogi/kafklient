@@ -2,10 +2,9 @@ import asyncio
 import unittest
 
 from kafklient import KafkaListener, Message
-
-from ._config import TEST_TIMEOUT
-from ._schema import FlagRecord
-from ._utils import (
+from kafklient.tests._config import TEST_TIMEOUT
+from kafklient.tests._schema import FlagRecord
+from kafklient.tests._utils import (
     as_bool,
     ensure_topic_exists,
     get_topic_and_group_id,

@@ -13,9 +13,9 @@ from time import perf_counter
 
 from kafklient import KafkaListener, Message, ParserSpec, logger
 
-from ._config import TEST_TIMEOUT
-from ._schema import FlagRecord, HelloRecord, IdxRecord
-from ._utils import (
+from kafklient.tests._config import TEST_TIMEOUT
+from kafklient.tests._schema import FlagRecord, HelloRecord, IdxRecord
+from kafklient.tests._utils import (
     as_bool,
     as_int,
     as_str,
@@ -129,9 +129,13 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
 
             await asyncio.wait_for(receive_all(), timeout=TEST_TIMEOUT)
 
-            assert len(received) == count, f"Expected {count} messages, got {len(received)}"
+            assert len(received) == count, (
+                f"Expected {count} messages, got {len(received)}"
+            )
             indices = sorted(record.idx for record in received)
-            assert indices == list(range(count)), f"Expected {list(range(count))}, got {indices}"
+            assert indices == list(range(count)), (
+                f"Expected {list(range(count))}, got {indices}"
+            )
 
             props = [
                 (arrival_times[i] - produce_start_times[i]) * 1000

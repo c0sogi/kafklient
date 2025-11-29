@@ -41,7 +41,9 @@ class QueueStream(Generic[T]):
 class TestBroker(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.stream: QueueStream[str] = QueueStream()
-        self.broker: Broker[str] = Broker(name="test-broker", listener=self.stream.listener)
+        self.broker: Broker[str] = Broker(
+            name="test-broker", listener=self.stream.listener
+        )
         # Broker builds the condition at import time; rebind it to this loop for tests.
         await self.broker.start()
         await self.stream.wait_for_subscription(expected=1)
@@ -54,7 +56,9 @@ class TestBroker(unittest.IsolatedAsyncioTestCase):
         waiter = asyncio.create_task(self.broker.wait_next(initial_version))
 
         await asyncio.sleep(0.01)
-        self.assertFalse(waiter.done(), "wait_next should block until a new item arrives")
+        self.assertFalse(
+            waiter.done(), "wait_next should block until a new item arrives"
+        )
 
         await self.stream.publish("alpha")
         result = await asyncio.wait_for(waiter, timeout=1.0)
@@ -91,8 +95,12 @@ class TestBroker(unittest.IsolatedAsyncioTestCase):
         async def succeeding_callback(_: str, __: Callback[str]) -> None:
             succeeding_called.set()
 
-        self.broker.register_callback(Callback(name="failing", callback=failing_callback))
-        self.broker.register_callback(Callback(name="succeeding", callback=succeeding_callback))
+        self.broker.register_callback(
+            Callback(name="failing", callback=failing_callback)
+        )
+        self.broker.register_callback(
+            Callback(name="succeeding", callback=succeeding_callback)
+        )
 
         await self.stream.publish("payload")
         await asyncio.wait_for(failing_called.wait(), timeout=1.0)
@@ -104,7 +112,9 @@ class TestBroker(unittest.IsolatedAsyncioTestCase):
     async def test_stop_and_restart_consumes_items(self) -> None:
         version_before = self.broker.current_version
         await self.stream.publish("one")
-        first = await asyncio.wait_for(self.broker.wait_next(version_before), timeout=1.0)
+        first = await asyncio.wait_for(
+            self.broker.wait_next(version_before), timeout=1.0
+        )
         self.assertEqual(first, "one")
 
         await self.broker.stop()
