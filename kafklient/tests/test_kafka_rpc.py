@@ -4,9 +4,8 @@ import unittest
 from time import perf_counter
 from typing import cast
 
-from .. import logger
-from ..clients import KafkaRPC
-from ..types import Message, ParserSpec
+from kafklient import KafkaRPC, Message, create_producer, logger
+
 from ._config import TEST_TIMEOUT
 from ._schema import EchoPayload, RPCResponsePayload
 from ._utils import (
@@ -15,8 +14,8 @@ from ._utils import (
     ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
-    make_consumer,
-    make_producer,
+    make_consumer_config,
+    make_producer_config,
     make_ready_consumer,
 )
 
@@ -33,12 +32,10 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         def parse_reply(rec: Message) -> bytes:
             return rec.value() or b""
 
-        specs: list[ParserSpec[bytes]] = [{"topics": [reply_topic], "type": bytes, "parser": parse_reply}]
-
         rpc = KafkaRPC(
-            parsers=specs,
-            producer_factory=make_producer,
-            consumer_factory=lambda: make_consumer(client_group),
+            parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
+            producer_config=make_producer_config(),
+            consumer_config=make_consumer_config(client_group),
         )
 
         server_ready = asyncio.Event()
@@ -46,7 +43,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
 
         async def echo_server() -> None:
             consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
-            producer = make_producer()
+            producer = create_producer(make_producer_config())
             server_ready.set()
 
             def poll_one() -> Message | None:
@@ -153,18 +150,16 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
                 server=as_str(data.get("server")),
             )
 
-        specs: list[ParserSpec[RPCResponsePayload]] = [
-            {
-                "topics": [reply_topic],
-                "type": RPCResponsePayload,
-                "parser": parse_json_reply,
-            }
-        ]
-
         rpc = KafkaRPC(
-            parsers=specs,
-            producer_factory=make_producer,
-            consumer_factory=lambda: make_consumer(client_group),
+            parsers=[
+                {
+                    "topics": [reply_topic],
+                    "type": RPCResponsePayload,
+                    "parser": parse_json_reply,
+                }
+            ],
+            producer_config=make_producer_config(),
+            consumer_config=make_consumer_config(client_group),
         )
 
         server_ready = asyncio.Event()
@@ -172,7 +167,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
 
         async def json_server() -> None:
             consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
-            producer = make_producer()
+            producer = create_producer(make_producer_config())
             server_ready.set()
 
             def poll_one() -> Message | None:
@@ -277,12 +272,10 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         def parse_reply(rec: Message) -> bytes:
             return rec.value() or b""
 
-        specs: list[ParserSpec[bytes]] = [{"topics": [reply_topic], "type": bytes, "parser": parse_reply}]
-
         rpc = KafkaRPC(
-            parsers=specs,
-            producer_factory=make_producer,
-            consumer_factory=lambda: make_consumer(client_group),
+            parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
+            producer_config=make_producer_config(),
+            consumer_config=make_consumer_config(client_group),
         )
 
         try:

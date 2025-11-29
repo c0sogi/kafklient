@@ -32,11 +32,6 @@ class ParserSpec(TypedDict, Generic[T_Co]):
     parser: Callable[[Message], T_Co]
 
 
-class AutoCommitConfig(TypedDict):
-    every: int | None
-    interval_s: float | None
-
-
 __all__ = [
     "ClusterMetadata",
     "Consumer",
@@ -47,7 +42,6 @@ __all__ = [
     "TopicPartition",
     "KafkaException",
     "ParserSpec",
-    "AutoCommitConfig",
     "ConsumerConfig",
     "ProducerConfig",
     "CommonConfig",

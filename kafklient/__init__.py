@@ -9,7 +9,6 @@ from .clients import (
 from .types import (
     OFFSET_END,
     AdminClient,
-    AutoCommitConfig,
     ClusterMetadata,
     CommonConfig,
     Consumer,
@@ -23,7 +22,7 @@ from .types import (
     ProducerConfig,
     TopicPartition,
 )
-from .utils import Broker, DedicatedThreadExecutor, TypeStream, Waiter
+from .utils import Broker, Callback, DedicatedThreadExecutor, TypeStream, Waiter
 
 logger = get_logger(__name__)
 
@@ -44,11 +43,11 @@ __all__ = [
     "KafkaException",
     "AdminClient",
     "Waiter",
-    "AutoCommitConfig",
     "ConsumerConfig",
     "ProducerConfig",
     "CommonConfig",
     "Broker",
+    "Callback",
     "TypeStream",
     "Waiter",
     "DedicatedThreadExecutor",

@@ -1,8 +1,8 @@
 import asyncio
 import unittest
 
-from ..clients import KafkaListener
-from ..types import Message, ParserSpec
+from kafklient import KafkaListener, Message
+
 from ._config import TEST_TIMEOUT
 from ._schema import FlagRecord
 from ._utils import (
@@ -10,7 +10,7 @@ from ._utils import (
     ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
-    make_consumer,
+    make_consumer_config,
     produce_messages,
 )
 
@@ -27,17 +27,15 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             data = loads_json(rec.value())
             return FlagRecord(test=as_bool(data.get("test")))
 
-        specs: list[ParserSpec[FlagRecord]] = [
-            {
-                "topics": [topic],
-                "type": FlagRecord,
-                "parser": parse_flag,
-            }
-        ]
-
         listener = KafkaListener(
-            parsers=specs,
-            consumer_factory=lambda: make_consumer(group_id),
+            parsers=[
+                {
+                    "topics": [topic],
+                    "type": FlagRecord,
+                    "parser": parse_flag,
+                }
+            ],
+            consumer_config=make_consumer_config(group_id),
         )
 
         await listener.start()
@@ -73,18 +71,16 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
         def parse_raw(rec: Message) -> bytes:
             return rec.value() or b""
 
-        specs: list[ParserSpec[bytes]] = [
-            {
-                "topics": [topic],
-                "type": bytes,
-                "parser": parse_raw,
-            }
-        ]
-
         listener = KafkaListener(
-            parsers=specs,
+            parsers=[
+                {
+                    "topics": [topic],
+                    "type": bytes,
+                    "parser": parse_raw,
+                }
+            ],
             seek_to_end_on_assign=False,
-            consumer_factory=lambda: make_consumer(group_id),
+            consumer_config=make_consumer_config(group_id),
         )
 
         try:

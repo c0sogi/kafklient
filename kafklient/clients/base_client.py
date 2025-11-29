@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import threading
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import InitVar, dataclass, field
 from types import TracebackType
@@ -18,11 +19,12 @@ from typing import (
 from .._logging import get_logger
 from ..types import (
     OFFSET_END,
-    AutoCommitConfig,
+    AdminClient,
     Consumer,
     ConsumerConfig,
     KafkaError,
     Message,
+    NewTopic,
     ParserSpec,
     Producer,
     ProducerConfig,
@@ -46,15 +48,30 @@ class KafkaBaseClient(ABC):
     with asyncio.to_thread() for non-blocking async API
     """
 
+    producer_config: ProducerConfig = field(default_factory=lambda: {"bootstrap.servers": "127.0.0.1:9092"})
+    consumer_config: ConsumerConfig = field(
+        default_factory=lambda: {
+            "bootstrap.servers": "127.0.0.1:9092",
+            "auto.offset.reset": "latest",
+        }
+    )
+
     # ---------- Behavior ----------
     seek_to_end_on_assign: bool = True  # 새 메시지부터
     metadata_refresh_min_interval_s: float = 5.0
-    auto_commit: Optional[AutoCommitConfig] = None
     backoff_min: float = 0.5
     backoff_max: float = 10.0
     backoff_factor: float = 2.0
     assignment_timeout_s: float = 5.0
     rebalance_listener: Optional[PartitionListener] = None
+
+    # ---------- Auto Topic Creation ----------
+    auto_create_topics: bool = False
+    """Automatically create topics if they don't exist before subscribing."""
+    topic_num_partitions: int = 1
+    """Number of partitions for auto-created topics."""
+    topic_replication_factor: int = 1
+    """Replication factor for auto-created topics."""
 
     # ---------- Parser / Correlation ----------
     parsers: Iterable[ParserSpec[object]] = ()
@@ -67,8 +84,6 @@ class KafkaBaseClient(ABC):
     """Correlation key extractor: (record, parsed or None) -> correlation_id (None if not found)"""
 
     _corr_from_record: Callable[[Message, Optional[object]], Optional[bytes]] = field(init=False, repr=False)
-    _producer_factory: Optional[Callable[[], Producer]] = field(default=None, init=False, repr=False)
-    _consumer_factory: Optional[Callable[[], Consumer]] = field(default=None, init=False, repr=False)
     _producer: Optional[Producer] = field(default=None, init=False, repr=False)
     _consumer: Optional[Consumer] = field(default=None, init=False, repr=False)
     _consumer_task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
@@ -116,6 +131,10 @@ class KafkaBaseClient(ABC):
         self._consumer_executor.start(self._loop)
         self._producer_executor.start(self._loop)
 
+        # Auto-create topics if enabled
+        if self.auto_create_topics and self._subscription_topics:
+            await self._ensure_topics_exist(list(self._subscription_topics))
+
         await self.ready(timeout=timeout)
 
         self._closed = False
@@ -139,12 +158,6 @@ class KafkaBaseClient(ABC):
 
         # Cleanup on the dedicated threads
         if self._consumer_executor.is_running:
-            if self._consumer is not None and self.auto_commit:
-                try:
-                    await self._consumer_executor.run(self._consumer.commit)
-                except Exception:
-                    logger.exception("Final commit failed")
-
             if self._consumer is not None:
                 try:
                     consumer = self._consumer
@@ -203,9 +216,9 @@ class KafkaBaseClient(ABC):
         async with self._start_lock:
             if self._producer is not None:
                 return self._producer
-            if self._producer_factory is None:
+            if self.producer_factory is None:
                 raise ValueError("producer_factory is not set")
-            self._producer = await self._producer_executor.run(self._producer_factory)
+            self._producer = await self._producer_executor.run(self.producer_factory)
             return self._producer
 
     @property
@@ -213,9 +226,9 @@ class KafkaBaseClient(ABC):
         async with self._start_lock:
             if self._consumer is not None:
                 return self._consumer
-            if self._consumer_factory is None:
+            if self.consumer_factory is None:
                 raise ValueError("consumer_factory is not set")
-            self._consumer = await self._consumer_executor.run(self._consumer_factory)
+            self._consumer = await self._consumer_executor.run(self.consumer_factory)
 
             # Sync callbacks that schedule async handlers (runs on dedicated thread)
             def _on_assign(consumer: Consumer, partitions: list[TopicPartition]) -> None:
@@ -386,28 +399,6 @@ class KafkaBaseClient(ABC):
         except Exception:
             logger.exception(f"Rebalance listener {method_name} failed")
 
-    # async def _wait_for_assignment(self, timeout: float | None = None) -> None:
-    #     """Poll until the consumer receives an assignment."""
-    #     if self._consumer is None or not self._subscription_topics:
-    #         return
-
-    #     consumer = self._consumer
-    #     if timeout is None:
-    #         timeout = self.assignment_timeout_s
-    #     deadline = time.time() + timeout
-
-    #     def _poll_until() -> bool:
-    #         while True:
-    #             consumer.poll(0.05)
-    #             if consumer.assignment():
-    #                 return True
-    #             if time.time() >= deadline:
-    #                 return False
-
-    #     assigned = await asyncio.to_thread(_poll_until)
-    #     if not assigned:
-    #         raise TimeoutError(f"assignment not received within {timeout}s")
-
     @staticmethod
     def _tp_sort_key(tp: TopicPartition) -> tuple[str, int]:
         return (tp.topic, tp.partition)
@@ -454,6 +445,76 @@ class KafkaBaseClient(ABC):
 
     @abstractmethod
     async def _on_stop_cleanup(self) -> None: ...
+
+    @property
+    def bootstrap_servers(self) -> str:
+        if "bootstrap.servers" not in self.producer_config or not self.producer_config["bootstrap.servers"]:
+            raise ValueError("bootstrap.servers is required")
+        return self.producer_config["bootstrap.servers"]
+
+    async def _ensure_topics_exist(self, topics: list[str]) -> None:
+        """Check if topics exist and create them if they don't."""
+        if not self.bootstrap_servers:
+            logger.warning("Cannot auto-create topics: bootstrap.servers not available")
+            return
+
+        def _create_missing_topics() -> list[str]:
+            admin = AdminClient({"bootstrap.servers": self.bootstrap_servers})
+            try:
+                # Get existing topics
+                metadata = admin.list_topics(timeout=10)
+                existing_topics = set(metadata.topics.keys())
+
+                # Find missing topics
+                missing_topics = [t for t in topics if t not in existing_topics]
+                if not missing_topics:
+                    return []
+
+                # Create missing topics
+                new_topics = [
+                    NewTopic(
+                        topic,
+                        num_partitions=self.topic_num_partitions,
+                        replication_factor=self.topic_replication_factor,
+                    )
+                    for topic in missing_topics
+                ]
+                futures = admin.create_topics(new_topics)
+
+                # Wait for creation to complete
+                created: list[str] = []
+                for topic, future in futures.items():
+                    try:
+                        future.result(timeout=10)
+                        created.append(topic)
+                    except Exception as e:
+                        logger.warning(f"Failed to create topic {topic}: {e}")
+                return created
+            finally:
+                pass  # AdminClient doesn't have a close method
+
+        try:
+            created = await asyncio.to_thread(_create_missing_topics)
+            if created:
+                logger.info(f"Auto-created topics: {created}")
+        except Exception:
+            logger.exception("Failed to auto-create topics")
+
+    @property
+    def producer_factory(self) -> Callable[[], Producer]:
+        producer_config = self.producer_config
+        if "bootstrap.servers" not in producer_config or not producer_config["bootstrap.servers"]:
+            raise ValueError("bootstrap.servers is required for producer factory")
+        return lambda: Producer(dict(producer_config), logger=logger)
+
+    @property
+    def consumer_factory(self) -> Callable[[], Consumer]:
+        consumer_config = self.consumer_config
+        if "group.id" not in consumer_config or not consumer_config["group.id"]:
+            consumer_config["group.id"] = f"{self.__class__.__name__}-{uuid.uuid4().hex[:8]}"
+        if "bootstrap.servers" not in consumer_config or not consumer_config["bootstrap.servers"]:
+            raise ValueError("bootstrap.servers is required for consumer factory")
+        return lambda: Consumer(dict(consumer_config), logger=logger)
 
 
 def create_consumer(config: ConsumerConfig, *, logger: logging.Logger | None = None) -> Consumer:

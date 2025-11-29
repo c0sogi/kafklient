@@ -13,13 +13,13 @@ import statistics
 import time
 from dataclasses import dataclass
 
-from ..clients import KafkaListener, KafkaRPC
-from ..types import Message, ParserSpec
+from kafklient import KafkaListener, KafkaRPC, Message, ParserSpec, create_producer
+
 from ._config import KAFKA_BOOTSTRAP
 from ._utils import (
     ensure_topic_exists,
-    make_consumer,
-    make_producer,
+    make_consumer_config,
+    make_producer_config,
     make_ready_consumer,
 )
 
@@ -95,11 +95,12 @@ async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
 
     listener = KafkaListener(
         parsers=specs,
-        consumer_factory=lambda: make_consumer(group_id),
+        consumer_config=make_consumer_config(group_id),
     )
 
     # Reuse single producer for fair comparison
-    producer = make_producer()
+    producer = create_producer(make_producer_config())
+
     latencies: list[float] = []
 
     try:
@@ -163,8 +164,8 @@ async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
 
     rpc = KafkaRPC(
         parsers=specs,
-        producer_factory=make_producer,
-        consumer_factory=lambda: make_consumer(client_group),
+        producer_config=make_producer_config(),
+        consumer_config=make_consumer_config(client_group),
     )
 
     server_stop = asyncio.Event()
@@ -172,7 +173,7 @@ async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
 
     async def echo_server() -> None:
         consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
-        producer = make_producer()
+        producer = create_producer(make_producer_config())
         server_ready.set()
 
         def poll_one() -> Message | None:

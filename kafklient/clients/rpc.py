@@ -1,13 +1,13 @@
 import asyncio
 import logging
 import uuid
-from dataclasses import InitVar, dataclass, field
-from typing import Callable, Optional, Type, override
+from dataclasses import dataclass, field
+from typing import Optional, Type, override
 
 from beartype.door import is_bearable
 
 from .._logging import get_logger
-from ..types import Consumer, KafkaError, Producer, T_Co
+from ..types import KafkaError, Producer, T_Co
 from ..types.backend import KafkaException, Message, TopicPartition
 from ..utils.task import Waiter
 from .base_client import KafkaBaseClient, PartitionListener
@@ -47,27 +47,8 @@ class KafkaRPC(KafkaBaseClient):
 
     # Seek to end on assign to ensure we only receive new responses
     seek_to_end_on_assign: bool = True
-
-    producer_factory: InitVar[Callable[[], Producer]] = lambda: Producer({
-        "bootstrap.servers": "127.0.0.1:9092",
-    })
-    consumer_factory: InitVar[Callable[[], Consumer]] = lambda: Consumer({
-        "bootstrap.servers": "127.0.0.1:9092",
-        "group.id": f"rpc-request-{uuid.uuid4().hex}",
-        "auto.offset.reset": "latest",
-    })
     rebalance_listener: Optional[PartitionListener] = field(default_factory=_RPCRebalanceListener)
-    _waiters: dict[bytes, Waiter[object]] = field(default_factory=dict, init=False, repr=False)
-
-    def __post_init__(
-        self,
-        corr_from_record: Optional[Callable[[Message, Optional[object]], Optional[bytes]]],
-        producer_factory: Callable[[], Producer],
-        consumer_factory: Callable[[], Consumer],
-    ) -> None:
-        super().__post_init__(corr_from_record)
-        self._producer_factory = producer_factory
-        self._consumer_factory = consumer_factory
+    waiters: dict[bytes, Waiter[object]] = field(default_factory=dict, init=False, repr=False)
 
     async def request(
         self,
@@ -115,7 +96,7 @@ class KafkaRPC(KafkaBaseClient):
 
         # Register waiter BEFORE sending to avoid race
         fut: asyncio.Future[T_Co] = asyncio.get_running_loop().create_future()
-        self._waiters[corr_id] = Waiter[T_Co](future=fut, expect_type=res_expect_type)
+        self.waiters[corr_id] = Waiter[T_Co](future=fut, expect_type=res_expect_type)
 
         try:
             await self._produce_request(
@@ -127,17 +108,17 @@ class KafkaRPC(KafkaBaseClient):
             )
             logger.debug(f"sent request corr_id={corr_id} topic={req_topic}")
         except Exception:
-            self._waiters.pop(corr_id, None)
+            self.waiters.pop(corr_id, None)
             raise
 
         # Wait for response
         try:
             return await asyncio.wait_for(fut, timeout=res_timeout)
         except asyncio.TimeoutError:
-            self._waiters.pop(corr_id, None)
+            self.waiters.pop(corr_id, None)
             raise TimeoutError(f"Timed out waiting for response (corr_id={corr_id})")
         except Exception:
-            self._waiters.pop(corr_id, None)
+            self.waiters.pop(corr_id, None)
             raise
 
     @override
@@ -187,21 +168,21 @@ class KafkaRPC(KafkaBaseClient):
     ) -> None:
         if not cid:
             return
-        waiter = self._waiters.get(cid)
+        waiter = self.waiters.get(cid)
         if not waiter or waiter.future.done():
             return
 
         expect = waiter.expect_type
         if expect is None:
             waiter.future.set_result(parsed_candidates[0][0])
-            self._waiters.pop(cid, None)
+            self.waiters.pop(cid, None)
             return
 
         for obj, _ in parsed_candidates:
             try:
                 if is_bearable(obj, expect):  # pyright: ignore[reportArgumentType]
                     waiter.future.set_result(obj)
-                    self._waiters.pop(cid, None)
+                    self.waiters.pop(cid, None)
                     return
             except Exception:
                 pass
@@ -212,8 +193,8 @@ class KafkaRPC(KafkaBaseClient):
         )
 
     async def _on_stop_cleanup(self) -> None:
-        for w in self._waiters.values():
+        for w in self.waiters.values():
             if not w.future.done():
                 w.future.set_exception(RuntimeError("Client stopped before response"))
-        self._waiters.clear()
+        self.waiters.clear()
         self._consumer_ready = False

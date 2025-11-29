@@ -18,7 +18,7 @@ Requirements
 Install
 -------
 ```bash
-pip install sdml-kafka-client
+pip install kafklient
 ```
 
 Core concepts
@@ -34,91 +34,83 @@ ParserSpec
 You declare which topics a client parses and how to parse them.
 
 ```python
-from kafklient.types import ParserSpec
-from confluent_kafka import Message
+from kafklient import Message, ParserSpec
 
-def parse_json(rec: Message) -> dict:
+
+def parse_json(rec: Message) -> dict[str, object]:
     import json
-    return json.loads(rec.value or b"{}")
 
-spec: ParserSpec[dict] = {
+    return json.loads(rec.value() or b"{}")
+
+
+spec: ParserSpec[dict[str, object]] = {
     "topics": ["events"],
-    "type": dict,
+    "type": dict[str, object],
     "parser": parse_json,
 }
+
 ```
 
 KafkaListener quickstart
 ------------------------
 ```python
 import asyncio
-from kafklient.clients import KafkaListener
-from kafklient.types import ParserSpec
-from confluent_kafka import Consumer
 
-specs: list[ParserSpec[dict]] = [
-    {
-        "topics": ["events"],
-        "type": dict,
-        "parser": lambda r: {"topic": r.topic, "value": (r.value or b"").decode("utf-8")},
-    }
-]
+from kafklient import KafkaListener
 
-listener = KafkaListener(
-    parsers=specs,
-    auto_commit={"every": 100, "interval_s": 5.0},
-    consumer_factory=lambda: Consumer(
-        {
-            "bootstrap.servers": "127.0.0.1:9092",
-            "group.id": "listener",              # required
-            "auto.offset.reset": "latest",
-        }
-    ),
-)
 
 async def main() -> None:
-    await listener.start()
-    stream = await listener.subscribe(dict)
-    async for item in stream:
-        print("got:", item)
+    async with KafkaListener(
+        parsers=[
+            {
+                "topics": ["my-topic"],
+                "type": dict[str, object],
+                "parser": lambda r: {"topic": r.topic(), "value": (r.value() or b"").decode("utf-8")},
+            }
+        ],
+        consumer_factory={
+            "bootstrap.servers": "127.0.0.1:9092",
+            "auto.offset.reset": "latest",
+        },
+    ) as listener:
+        stream = await listener.subscribe(dict[str, object])
+        async for item in stream:
+            print("got:", item)
+
 
 asyncio.run(main())
+
 ```
 
 KafkaRPC quickstart
 -------------------
 ```python
 import asyncio
-from kafklient.clients import KafkaRPC
-from kafklient.types import ParserSpec
-from confluent_kafka import Consumer, Message
 
-def parse_reply(rec: Message) -> bytes:
-    return rec.value or b""
+from kafklient import KafkaRPC
 
-rpc = KafkaRPC(
-    parsers=[{"topics": ["reply"], "type": bytes, "parser": parse_reply}],
-    consumer_factory=lambda: Consumer(
-        {
-            "bootstrap.servers": "127.0.0.1:9092",
-            "group.id": "rpc-client-unique",     # must be unique per requester instance
-            "auto.offset.reset": "latest",
-        }
-    ),
-)
 
 async def main() -> None:
-    await rpc.start()
-    res = await rpc.request(
-        req_topic="request",
-        req_value=b"hello",
-        # Optionally direct server to respond to specific topics
-        req_headers_reply_to=["reply"],
-        res_expect_type=bytes,
-    )
-    print("response:", res)
+    async with KafkaRPC(
+        parsers=[{"topics": ["my-topic"], "type": bytes, "parser": lambda r: r.value() or b""}],
+        producer_factory={"bootstrap.servers": "127.0.0.1:9092"},
+        consumer_factory={
+            "bootstrap.servers": "127.0.0.1:9092",
+            "auto.offset.reset": "latest",
+        },
+    ) as rpc:
+        res = await rpc.request(
+            req_topic="request",
+            req_value=b"hello",
+            # Optionally direct server to respond to specific topics
+            req_headers_reply_to=["reply"],
+            res_expect_type=bytes,
+        )
+        print("response:", res)
+
 
 asyncio.run(main())
+
 ```
 
 RPC server pattern
@@ -144,7 +136,6 @@ Group_id guidance
 
 Offsets & auto commit
 ---------------------
-- `auto_commit` is optional. When provided, commits happen by message count and/or interval.
 - `auto_offset_reset` defaults are set on consumer factories in examples to `latest`.
 
 Correlation IDs
@@ -154,10 +145,37 @@ Correlation IDs
 
 Thread-based async implementation
 ---------------------------------
-This library uses sync `Consumer` and `Producer` from confluent-kafka, wrapped with `asyncio.to_thread()` to provide a non-blocking async API. This approach:
+This library uses sync `Consumer` and `Producer` from confluent-kafka, wrapped with dedicated thread executors (`DedicatedThreadExecutor`) to provide a non-blocking async API. This approach:
 - Avoids blocking the event loop during Kafka operations
+- Uses separate dedicated threads for consumer and producer operations
 - Provides stable, production-ready Kafka client behavior
 - Works with all existing confluent-kafka features and configurations
+
+Auto topic creation
+-------------------
+Both `KafkaListener` and `KafkaRPC` can automatically create topics if they don't exist. Enable this feature with `auto_create_topics=True`:
+
+```python
+async with KafkaListener(
+    parsers=[{"topics": ["my-topic"], "type": bytes, "parser": lambda r: r.value() or b""}],
+    consumer_factory={"bootstrap.servers": "127.0.0.1:9092"},
+    auto_create_topics=True,
+    topic_num_partitions=3,      # default: 1
+    topic_replication_factor=1,  # default: 1
+) as listener:
+    # Topics are created before subscribing
+    stream = await listener.subscribe(bytes)
+    async for item in stream:
+        print(item)
+
+```
+
+Options:
+- `auto_create_topics: bool = False` - Enable automatic topic creation
+- `topic_num_partitions: int = 1` - Number of partitions for auto-created topics
+- `topic_replication_factor: int = 1` - Replication factor for auto-created topics
+
+Note: This uses AdminClient internally and requires appropriate broker permissions.
 
 Production notes
 ----------------
@@ -169,9 +187,9 @@ Production notes
 API reference (selected)
 ------------------------
 - `KafkaListener(parsers: Iterable[ParserSpec[object]], ...)`
-  - `subscribe(tp: Type[T], queue_maxsize: int = 0, fresh: bool = False) -> TypeStream[T]`
+  - `subscribe(tp: Type[T], *, queue_maxsize: int = 0, fresh: bool = False) -> TypeStream[T]`
 - `KafkaRPC(parsers: Iterable[ParserSpec[object]], ...)`
-  - `request(req_topic: str, req_value: bytes, *, req_key: bytes | None = None, req_headers: list[tuple[str, bytes]] | None = None, req_headers_reply_to: list[str] | None = None, res_timeout: float = 30.0, res_expect_type: Type[T] | None = None, correlation_id: bytes | None = None, propagate_corr_to: str = "both", correlation_header_key: str = "request_id") -> T`
+  - `request(req_topic: str, req_value: bytes, *, req_key: bytes | None = None, req_headers: list[tuple[str, str | bytes]] | None = None, req_headers_reply_to: list[str] | None = None, res_timeout: float = 30.0, res_expect_type: Type[T] | None = None, correlation_id: bytes | None = None, propagate_corr_to: str = "both", correlation_header_key: str = "request_id") -> T`
 
 License
 -------

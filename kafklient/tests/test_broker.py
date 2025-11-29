@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from typing import AsyncIterator, Generic, TypeVar
 
-from ..utils.broker import Broker, Callback
+from kafklient import Broker, Callback
 
 T = TypeVar("T")
 

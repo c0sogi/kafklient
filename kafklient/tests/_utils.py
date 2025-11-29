@@ -10,8 +10,16 @@ import json
 import uuid
 from typing import Callable, Sequence
 
-from ..clients.base_client import create_consumer, create_producer
-from ..types.backend import AdminClient, Consumer, NewTopic, Producer
+from kafklient import (
+    AdminClient,
+    Consumer,
+    ConsumerConfig,
+    NewTopic,
+    Producer,
+    ProducerConfig,
+    create_consumer,
+)
+
 from ._config import KAFKA_BOOTSTRAP
 
 
@@ -62,22 +70,19 @@ def get_topic_and_group_id(func: Callable[..., object], *, suffix: str = "") -> 
     return f"{func.__name__}{suffix}", f"{func.__name__}{suffix}-{uuid.uuid4().hex[:8]}"
 
 
-def make_consumer(group_id: str) -> Consumer:
-    return create_consumer({
+def make_consumer_config(group_id: str) -> ConsumerConfig:
+    return {
         "bootstrap.servers": KAFKA_BOOTSTRAP,
         "group.id": group_id,
         "auto.offset.reset": "latest",
         "enable.auto.commit": False,
-        # Faster rebalance for tests
-        "session.timeout.ms": 6000,
-        "heartbeat.interval.ms": 1000,
-    })
+    }
 
 
-def make_producer() -> Producer:
-    return create_producer({
+def make_producer_config() -> ProducerConfig:
+    return {
         "bootstrap.servers": KAFKA_BOOTSTRAP,
-    })
+    }
 
 
 async def ensure_topic_exists(topic: str) -> None:

@@ -1,4 +1,4 @@
-from .broker import Broker
+from .broker import Broker, Callback
 from .executor import DedicatedThreadExecutor
 from .task import TypeStream, Waiter
 
@@ -7,4 +7,5 @@ __all__ = [
     "DedicatedThreadExecutor",
     "Waiter",
     "TypeStream",
+    "Callback",
 ]

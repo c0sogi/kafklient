@@ -11,9 +11,8 @@ import unittest
 import uuid
 from time import perf_counter
 
-from .. import logger
-from ..clients import KafkaListener
-from ..types import Message, ParserSpec
+from kafklient import KafkaListener, Message, ParserSpec, logger
+
 from ._config import TEST_TIMEOUT
 from ._schema import FlagRecord, HelloRecord, IdxRecord
 from ._utils import (
@@ -23,7 +22,7 @@ from ._utils import (
     ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
-    make_consumer,
+    make_consumer_config,
     produce_messages,
 )
 
@@ -53,7 +52,7 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
 
         listener = KafkaListener(
             parsers=specs,
-            consumer_factory=lambda: make_consumer(group_id),
+            consumer_config=make_consumer_config(group_id),
         )
 
         try:
@@ -97,17 +96,15 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
             data = loads_json(rec.value())
             return IdxRecord(idx=as_int(data.get("idx")))
 
-        specs: list[ParserSpec[IdxRecord]] = [
-            {
-                "topics": [topic],
-                "type": IdxRecord,
-                "parser": parse_idx,
-            }
-        ]
-
         listener = KafkaListener(
-            parsers=specs,
-            consumer_factory=lambda: make_consumer(group_id),
+            parsers=[
+                {
+                    "topics": [topic],
+                    "type": IdxRecord,
+                    "parser": parse_idx,
+                }
+            ],
+            consumer_config=make_consumer_config(group_id),
         )
 
         try:
@@ -172,7 +169,7 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
 
         async with KafkaListener(
             parsers=specs,
-            consumer_factory=lambda: make_consumer(group_id),
+            consumer_config=make_consumer_config(group_id),
         ) as listener:
             stream = await listener.subscribe(FlagRecord)
 
