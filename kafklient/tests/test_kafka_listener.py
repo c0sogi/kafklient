@@ -129,13 +129,9 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
 
             await asyncio.wait_for(receive_all(), timeout=TEST_TIMEOUT)
 
-            assert len(received) == count, (
-                f"Expected {count} messages, got {len(received)}"
-            )
+            assert len(received) == count, f"Expected {count} messages, got {len(received)}"
             indices = sorted(record.idx for record in received)
-            assert indices == list(range(count)), (
-                f"Expected {list(range(count))}, got {indices}"
-            )
+            assert indices == list(range(count)), f"Expected {list(range(count))}, got {indices}"
 
             props = [
                 (arrival_times[i] - produce_start_times[i]) * 1000

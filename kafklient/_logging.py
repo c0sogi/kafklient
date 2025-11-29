@@ -34,11 +34,7 @@ def _supports_color(stream: TextIO) -> bool:
 
     if sys.platform != "win32":
         return True
-    return bool(
-        os.environ.get("ANSICON")
-        or os.environ.get("WT_SESSION")
-        or os.environ.get("TERM_PROGRAM") == "vscode"
-    )
+    return bool(os.environ.get("ANSICON") or os.environ.get("WT_SESSION") or os.environ.get("TERM_PROGRAM") == "vscode")
 
 
 class _ColorFormatter(logging.Formatter):

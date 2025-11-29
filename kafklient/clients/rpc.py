@@ -48,7 +48,7 @@ class KafkaRPC(KafkaBaseClient):
     # Seek to end on assign to ensure we only receive new responses
     seek_to_end_on_assign: bool = True
     rebalance_listener: Optional[PartitionListener] = field(default_factory=_RPCRebalanceListener)
-    waiters: dict[bytes, Waiter[object]] = field(default_factory=dict, init=False, repr=False)
+    waiters: dict[bytes, Waiter[object]] = field(default_factory=dict[bytes, Waiter[object]], init=False, repr=False)
 
     async def request(
         self,

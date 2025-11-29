@@ -23,9 +23,7 @@ CommonConfig = TypedDict(
         "max.in.flight.requests.per.connection": int,  # Max in-flight requests. Range: 1-1000000. Default: 1000000
         "max.in.flight": int,  # Alias for max.in.flight.requests.per.connection
         # Metadata Configuration
-        "metadata.recovery.strategy": Literal[
-            "none", "rebootstrap"
-        ],  # Recovery strategy. Default: rebootstrap
+        "metadata.recovery.strategy": Literal["none", "rebootstrap"],  # Recovery strategy. Default: rebootstrap
         "metadata.recovery.rebootstrap.trigger.ms": int,  # Rebootstrap trigger. Range: 0-2147483647. Default: 300000
         "topic.metadata.refresh.interval.ms": int,  # Metadata refresh interval. Range: -1-3600000. Default: 300000
         "metadata.max.age.ms": int,  # Metadata cache max age. Range: 1-86400000. Default: 900000
@@ -43,11 +41,9 @@ CommonConfig = TypedDict(
         "socket.nagle.disable": bool,  # Disable Nagle algorithm. Default: true
         "socket.max.fails": int,  # Max send failures before disconnect. Range: 0-1000000. Default: 1
         "socket.connection.setup.timeout.ms": int,  # Connection setup timeout. Range: 1000-2147483647. Default: 30000
-        # Broker Configuration
+        # Broadcaster Configuration
         "broker.address.ttl": int,  # Address cache TTL. Range: 0-86400000. Default: 1000
-        "broker.address.family": Literal[
-            "any", "v4", "v6"
-        ],  # IP address family. Default: any
+        "broker.address.family": Literal["any", "v4", "v6"],  # IP address family. Default: any
         # Connection Configuration
         "connections.max.idle.ms": int,  # Close idle connections. Range: 0-2147483647. Default: 0
         "reconnect.backoff.ms": int,  # Initial reconnect backoff. Range: 0-3600000. Default: 100
@@ -69,9 +65,7 @@ CommonConfig = TypedDict(
         "api.version.request.timeout.ms": int,  # API version request timeout. Range: 1-300000. Default: 10000
         "allow.auto.create.topics": bool,  # Allow auto topic creation. Default: false
         # Security Protocol
-        "security.protocol": Literal[
-            "plaintext", "ssl", "sasl_plaintext", "sasl_ssl"
-        ],  # Protocol. Default: plaintext
+        "security.protocol": Literal["plaintext", "ssl", "sasl_plaintext", "sasl_ssl"],  # Protocol. Default: plaintext
         # SSL Configuration
         "ssl.cipher.suites": str,  # Cipher suites for TLS/SSL
         "ssl.curves.list": str,  # Supported curves for TLS ClientHello
@@ -90,9 +84,7 @@ CommonConfig = TypedDict(
         "ssl.providers": str,  # OpenSSL 3.0.x providers
         "ssl.engine.id": str,  # OpenSSL engine id. Default: dynamic
         "enable.ssl.certificate.verification": bool,  # Enable broker cert verification. Default: true
-        "ssl.endpoint.identification.algorithm": Literal[
-            "none", "https"
-        ],  # Endpoint identification. Default: https
+        "ssl.endpoint.identification.algorithm": Literal["none", "https"],  # Endpoint identification. Default: https
         # HTTPS Configuration (for OIDC)
         "https.ca.location": str,  # Path to CA for HTTPS endpoints
         "https.ca.pem": str,  # CA certificate for HTTPS endpoints
@@ -109,9 +101,7 @@ CommonConfig = TypedDict(
         # OAUTHBEARER Configuration
         "sasl.oauthbearer.config": str,  # OAUTHBEARER configuration
         "enable.sasl.oauthbearer.unsecure.jwt": bool,  # Enable unsecure JWT handler. Default: false
-        "sasl.oauthbearer.method": Literal[
-            "default", "oidc"
-        ],  # Login method. Default: default
+        "sasl.oauthbearer.method": Literal["default", "oidc"],  # Login method. Default: default
         "sasl.oauthbearer.client.id": str,  # Public identifier (OIDC)
         "sasl.oauthbearer.client.credentials.client.id": str,  # Alias for client.id
         "sasl.oauthbearer.client.secret": str,  # Client secret (OIDC)
@@ -122,9 +112,7 @@ CommonConfig = TypedDict(
         "sasl.oauthbearer.grant.type": Literal[
             "client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"
         ],  # Grant type. Default: client_credentials
-        "sasl.oauthbearer.assertion.algorithm": Literal[
-            "RS256", "ES256"
-        ],  # JWT assertion algorithm. Default: RS256
+        "sasl.oauthbearer.assertion.algorithm": Literal["RS256", "ES256"],  # JWT assertion algorithm. Default: RS256
         "sasl.oauthbearer.assertion.private.key.file": str,  # Private key for JWT assertion
         "sasl.oauthbearer.assertion.private.key.passphrase": str,  # Key passphrase
         "sasl.oauthbearer.assertion.private.key.pem": str,  # Private key (PEM)
@@ -189,7 +177,7 @@ ConsumerConfig = TypedDict(
         "socket.nagle.disable": bool,
         "socket.max.fails": int,
         "socket.connection.setup.timeout.ms": int,
-        # Broker Configuration
+        # Broadcaster Configuration
         "broker.address.ttl": int,
         "broker.address.family": Literal["any", "v4", "v6"],
         # Connection Configuration
@@ -257,9 +245,7 @@ ConsumerConfig = TypedDict(
         "sasl.oauthbearer.scope": str,
         "sasl.oauthbearer.extensions": str,
         "sasl.oauthbearer.token.endpoint.url": str,
-        "sasl.oauthbearer.grant.type": Literal[
-            "client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"
-        ],
+        "sasl.oauthbearer.grant.type": Literal["client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
         "sasl.oauthbearer.assertion.algorithm": Literal["RS256", "ES256"],
         "sasl.oauthbearer.assertion.private.key.file": str,
         "sasl.oauthbearer.assertion.private.key.passphrase": str,
@@ -280,9 +266,7 @@ ConsumerConfig = TypedDict(
         # Metrics
         "enable.metrics.push": bool,
         # DNS
-        "client.dns.lookup": Literal[
-            "use_all_dns_ips", "resolve_canonical_bootstrap_servers_only"
-        ],
+        "client.dns.lookup": Literal["use_all_dns_ips", "resolve_canonical_bootstrap_servers_only"],
         # === Consumer-specific properties ===
         # Group Configuration
         "group.id": str,  # Client group id. Required for consumer groups
@@ -291,9 +275,7 @@ ConsumerConfig = TypedDict(
         "session.timeout.ms": int,  # Session timeout. Range: 1-3600000. Default: 45000
         "heartbeat.interval.ms": int,  # Heartbeat interval. Range: 1-3600000. Default: 3000
         "group.protocol.type": str,  # Protocol type for classic. Default: consumer
-        "group.protocol": Literal[
-            "classic", "consumer"
-        ],  # Group protocol. Default: classic
+        "group.protocol": Literal["classic", "consumer"],  # Group protocol. Default: classic
         "group.remote.assignor": str,  # Server side assignor: uniform, range
         "coordinator.query.interval.ms": int,  # Coordinator query interval. Range: 1-3600000. Default: 600000
         "max.poll.interval.ms": int,  # Max time between consume calls. Range: 1-86400000. Default: 300000
@@ -365,7 +347,7 @@ ProducerConfig = TypedDict(
         "socket.nagle.disable": bool,
         "socket.max.fails": int,
         "socket.connection.setup.timeout.ms": int,
-        # Broker Configuration
+        # Broadcaster Configuration
         "broker.address.ttl": int,
         "broker.address.family": Literal["any", "v4", "v6"],
         # Connection Configuration
@@ -433,9 +415,7 @@ ProducerConfig = TypedDict(
         "sasl.oauthbearer.scope": str,
         "sasl.oauthbearer.extensions": str,
         "sasl.oauthbearer.token.endpoint.url": str,
-        "sasl.oauthbearer.grant.type": Literal[
-            "client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"
-        ],
+        "sasl.oauthbearer.grant.type": Literal["client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
         "sasl.oauthbearer.assertion.algorithm": Literal["RS256", "ES256"],
         "sasl.oauthbearer.assertion.private.key.file": str,
         "sasl.oauthbearer.assertion.private.key.passphrase": str,
@@ -456,9 +436,7 @@ ProducerConfig = TypedDict(
         # Metrics
         "enable.metrics.push": bool,
         # DNS
-        "client.dns.lookup": Literal[
-            "use_all_dns_ips", "resolve_canonical_bootstrap_servers_only"
-        ],
+        "client.dns.lookup": Literal["use_all_dns_ips", "resolve_canonical_bootstrap_servers_only"],
         # === Producer-specific properties ===
         # Transaction Configuration
         "transactional.id": str,  # Transactional producer ID. Requires broker >= 0.11.0
@@ -476,12 +454,8 @@ ProducerConfig = TypedDict(
         "message.send.max.retries": int,  # Max retries. Range: 0-2147483647. Default: 2147483647
         "retries": int,  # Alias for message.send.max.retries
         # Compression
-        "compression.codec": Literal[
-            "none", "gzip", "snappy", "lz4", "zstd"
-        ],  # Compression. Default: none
-        "compression.type": Literal[
-            "none", "gzip", "snappy", "lz4", "zstd"
-        ],  # Alias for compression.codec
+        "compression.codec": Literal["none", "gzip", "snappy", "lz4", "zstd"],  # Compression. Default: none
+        "compression.type": Literal["none", "gzip", "snappy", "lz4", "zstd"],  # Alias for compression.codec
         # Batching
         "batch.num.messages": int,  # Max messages per batch. Range: 1-1000000. Default: 10000
         "batch.size": int,  # Max batch size in bytes. Range: 1-2147483647. Default: 1000000

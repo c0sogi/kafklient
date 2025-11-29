@@ -16,7 +16,7 @@ class KafkaListener(KafkaBaseClient):
     """A Kafka listener that subscribes to topics and returns a stream of objects"""
 
     subscriptions: dict[Type[object], tuple[asyncio.Queue[object], asyncio.Event]] = field(
-        default_factory=dict, init=False, repr=False
+        default_factory=dict[Type[object], tuple[asyncio.Queue[object], asyncio.Event]], init=False, repr=False
     )
 
     async def subscribe(

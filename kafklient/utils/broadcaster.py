@@ -16,19 +16,15 @@ class Callback(Generic[T]):
 
 
 @dataclass
-class Broker(Generic[T]):
+class Broadcaster(Generic[T]):
     name: str
     listener: Callable[[], Awaitable[AsyncIterator[T]]]
 
     _latest_item: Optional[T] = field(default=None, init=False, repr=False)
     _version: int = field(default=0, init=False, repr=False)
-    _cond: asyncio.Condition = field(
-        default_factory=asyncio.Condition, init=False, repr=False
-    )
+    _cond: asyncio.Condition = field(default_factory=asyncio.Condition, init=False, repr=False)
     _task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
-    _callbacks: dict[str, Callback[T]] = field(
-        default_factory=dict, init=False, repr=False
-    )
+    _callbacks: dict[str, Callback[T]] = field(default_factory=dict[str, Callback[T]], init=False, repr=False)
     _stopping: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -39,9 +35,7 @@ class Broker(Generic[T]):
         if self._task is not None and not self._task.done():
             return
         self._stopping = False
-        self._task = asyncio.create_task(
-            self._run_consumer(), name=f"{self.name}-broker-consumer"
-        )
+        self._task = asyncio.create_task(self._run_consumer(), name=f"{self.name}-broadcaster-consumer")
 
     async def stop(self) -> None:
         self._stopping = True

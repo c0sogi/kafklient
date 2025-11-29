@@ -18,7 +18,6 @@ from time import perf_counter
 from typing import Optional, Type
 
 from kafklient import KafkaBaseClient, Message, logger
-
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._utils import (
     ensure_topic_exists,
@@ -32,12 +31,8 @@ from kafklient.tests._utils import (
 class SimpleTestClient(KafkaBaseClient):
     """Minimal concrete implementation for testing base client functionality."""
 
-    received_records: list[Message] = field(
-        default_factory=list, init=False, repr=False
-    )
-    record_event: asyncio.Event = field(
-        default_factory=asyncio.Event, init=False, repr=False
-    )
+    received_records: list[Message] = field(default_factory=list[Message], init=False, repr=False)
+    record_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
 
     @property
     def is_closed(self) -> bool:
@@ -94,9 +89,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
 
             assert len(client.received_records) >= 1, "No message received"
             received_value = client.received_records[-1].value()
-            assert received_value == test_value, (
-                f"Expected {test_value}, got {received_value}"
-            )
+            assert received_value == test_value, f"Expected {test_value}, got {received_value}"
 
             logger.info(
                 f"[performance] {self.__class__.__name__}.test_produce_single_message: "
@@ -150,9 +143,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
                 ("x-request-id", b"req-123"),
                 ("x-trace-id", "trace-456"),
             ]
-            await client.produce(
-                topic, value=b"header-test", headers=test_headers, flush=True
-            )
+            await client.produce(topic, value=b"header-test", headers=test_headers, flush=True)
 
             await asyncio.wait_for(client.record_event.wait(), timeout=TEST_TIMEOUT)
 
@@ -360,9 +351,7 @@ class TestBaseClientAutoCreateTopics(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[
-                {"topics": [unique_topic], "type": Message, "parser": lambda r: r}
-            ],
+            parsers=[{"topics": [unique_topic], "type": Message, "parser": lambda r: r}],
             auto_create_topics=True,
             topic_num_partitions=1,
             topic_replication_factor=1,
@@ -373,9 +362,7 @@ class TestBaseClientAutoCreateTopics(unittest.IsolatedAsyncioTestCase):
             await client.start()
 
             # Should be able to produce to the auto-created topic
-            await client.produce(
-                unique_topic, value=b"auto-created-topic-test", flush=True
-            )
+            await client.produce(unique_topic, value=b"auto-created-topic-test", flush=True)
 
             await asyncio.wait_for(client.record_event.wait(), timeout=TEST_TIMEOUT)
             assert len(client.received_records) >= 1

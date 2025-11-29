@@ -23,12 +23,8 @@ from kafklient.tests._utils import (
 class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
     async def test_rpc_request_response(self) -> None:
         """Test basic RPC request/response pattern."""
-        request_topic, client_group = get_topic_and_group_id(
-            self.test_rpc_request_response, suffix="request"
-        )
-        reply_topic, server_group = get_topic_and_group_id(
-            self.test_rpc_request_response, suffix="reply"
-        )
+        request_topic, client_group = get_topic_and_group_id(self.test_rpc_request_response, suffix="request")
+        reply_topic, server_group = get_topic_and_group_id(self.test_rpc_request_response, suffix="reply")
 
         await ensure_topic_exists(request_topic)
         await ensure_topic_exists(reply_topic)
@@ -46,9 +42,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         server_stop = asyncio.Event()
 
         async def echo_server() -> None:
-            consumer = await asyncio.to_thread(
-                make_ready_consumer, server_group, [request_topic]
-            )
+            consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
             producer = create_producer(make_producer_config())
             server_ready.set()
 
@@ -70,9 +64,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
                         corr_id = v
 
                 if reply_to:
-                    reply_headers: list[tuple[str, str | bytes]] = (
-                        [("request_id", corr_id)] if corr_id else []
-                    )
+                    reply_headers: list[tuple[str, str | bytes]] = [("request_id", corr_id)] if corr_id else []
                     reply_value = msg.value() or b""
                     reply_topic_name = reply_to
 
@@ -136,12 +128,8 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
 
     async def test_rpc_with_json_response(self) -> None:
         """Test RPC with JSON parsing."""
-        request_topic, client_group = get_topic_and_group_id(
-            self.test_rpc_with_json_response, suffix="request"
-        )
-        reply_topic, server_group = get_topic_and_group_id(
-            self.test_rpc_with_json_response, suffix="reply"
-        )
+        request_topic, client_group = get_topic_and_group_id(self.test_rpc_with_json_response, suffix="request")
+        reply_topic, server_group = get_topic_and_group_id(self.test_rpc_with_json_response, suffix="reply")
 
         await ensure_topic_exists(request_topic)
         await ensure_topic_exists(reply_topic)
@@ -178,9 +166,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         server_stop = asyncio.Event()
 
         async def json_server() -> None:
-            consumer = await asyncio.to_thread(
-                make_ready_consumer, server_group, [request_topic]
-            )
+            consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
             producer = create_producer(make_producer_config())
             server_ready.set()
 
@@ -203,17 +189,17 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
 
                 if reply_to:
                     req_data = loads_json(msg.value())
-                    response_bytes = json.dumps({
-                        "status": "ok",
-                        "echo": {
-                            "action": as_str(req_data.get("action")),
-                            "value": as_int(req_data.get("value")),
-                        },
-                        "server": "json-server",
-                    }).encode()
-                    reply_headers: list[tuple[str, str | bytes]] = (
-                        [("request_id", corr_id)] if corr_id else []
-                    )
+                    response_bytes = json.dumps(
+                        {
+                            "status": "ok",
+                            "echo": {
+                                "action": as_str(req_data.get("action")),
+                                "value": as_int(req_data.get("value")),
+                            },
+                            "server": "json-server",
+                        }
+                    ).encode()
+                    reply_headers: list[tuple[str, str | bytes]] = [("request_id", corr_id)] if corr_id else []
                     reply_topic_name = reply_to
 
                     def send() -> None:
@@ -279,9 +265,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
 
     async def test_rpc_timeout(self) -> None:
         """Test that RPC properly times out when no response."""
-        request_topic, client_group = get_topic_and_group_id(
-            self.test_rpc_timeout, suffix="request"
-        )
+        request_topic, client_group = get_topic_and_group_id(self.test_rpc_timeout, suffix="request")
         reply_topic, _ = get_topic_and_group_id(self.test_rpc_timeout, suffix="reply")
 
         await ensure_topic_exists(request_topic)

@@ -119,14 +119,16 @@ async def produce_messages(
 
 def make_ready_consumer(group_id: str, topics: list[str]) -> Consumer:
     """Create a consumer that's ready to receive messages (already subscribed and stabilized)."""
-    consumer = create_consumer({
-        "bootstrap.servers": KAFKA_BOOTSTRAP,
-        "group.id": group_id,
-        "auto.offset.reset": "latest",
-        "enable.auto.commit": False,
-        "session.timeout.ms": 6000,
-        "heartbeat.interval.ms": 1000,
-    })
+    consumer = create_consumer(
+        {
+            "bootstrap.servers": KAFKA_BOOTSTRAP,
+            "group.id": group_id,
+            "auto.offset.reset": "latest",
+            "enable.auto.commit": False,
+            "session.timeout.ms": 6000,
+            "heartbeat.interval.ms": 1000,
+        }
+    )
     consumer.subscribe(topics)
     # Poll until assigned and stabilized (Windows needs ~3s)
     for _ in range(50):

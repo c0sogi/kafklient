@@ -22,7 +22,7 @@ from .types import (
     ProducerConfig,
     TopicPartition,
 )
-from .utils import Broker, Callback, DedicatedThreadExecutor, TypeStream, Waiter
+from .utils import Broadcaster, Callback, DedicatedThreadExecutor, TypeStream, Waiter
 
 logger = get_logger(__name__)
 
@@ -46,7 +46,7 @@ __all__ = [
     "ConsumerConfig",
     "ProducerConfig",
     "CommonConfig",
-    "Broker",
+    "Broadcaster",
     "Callback",
     "TypeStream",
     "Waiter",
