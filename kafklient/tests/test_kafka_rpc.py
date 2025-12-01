@@ -60,11 +60,11 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
                 for k, v in headers:
                     if k == "x-reply-topic":
                         reply_to = v.decode()
-                    if k.lower() == "request_id":
+                    if k.lower() == "x-corr-id":
                         corr_id = v
 
                 if reply_to:
-                    reply_headers: list[tuple[str, str | bytes]] = [("request_id", corr_id)] if corr_id else []
+                    reply_headers: list[tuple[str, str | bytes]] = [("x-corr-id", corr_id)] if corr_id else []
                     reply_value = msg.value() or b""
                     reply_topic_name = reply_to
 
@@ -184,7 +184,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
                 for k, v in headers:
                     if k == "x-reply-topic":
                         reply_to = v.decode()
-                    if k.lower() == "request_id":
+                    if k.lower() == "x-corr-id":
                         corr_id = v
 
                 if reply_to:
@@ -199,7 +199,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
                             "server": "json-server",
                         }
                     ).encode()
-                    reply_headers: list[tuple[str, str | bytes]] = [("request_id", corr_id)] if corr_id else []
+                    reply_headers: list[tuple[str, str | bytes]] = [("x-corr-id", corr_id)] if corr_id else []
                     reply_topic_name = reply_to
 
                     def send() -> None:

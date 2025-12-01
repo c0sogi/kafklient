@@ -49,12 +49,7 @@ class SimpleTestClient(KafkaBaseClient):
         """Check if consumer is initialized."""
         return self._consumer is not None
 
-    async def _on_record(
-        self,
-        record: Message,
-        parsed_candidates: list[tuple[object, Type[object]]],
-        cid: Optional[bytes],
-    ) -> None:
+    async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None:
         self.received_records.append(record)
         self.record_event.set()
 

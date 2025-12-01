@@ -140,8 +140,8 @@ Offsets & auto commit
 
 Correlation IDs
 ---------------
-- `KafkaBaseClient` extracts correlation IDs from headers (`request_id`, `correlation_id`, `x-correlation-id`) or from the key when present.
-- `KafkaRPC.request` can propagate the correlation ID in key and/or a header you choose (default header: `request_id`).
+- `KafkaBaseClient` extracts correlation IDs from headers (e.g. `x-corr-id`) or from the key when present.
+- `KafkaRPC.request` can propagate the correlation ID in key and/or a header you choose (default header: `x-corr-id`).
 
 Thread-based async implementation
 ---------------------------------
@@ -189,7 +189,7 @@ API reference (selected)
 - `KafkaListener(parsers: Iterable[ParserSpec[object]], ...)`
   - `subscribe(tp: Type[T], *, queue_maxsize: int = 0, fresh: bool = False) -> TypeStream[T]`
 - `KafkaRPC(parsers: Iterable[ParserSpec[object]], ...)`
-  - `request(req_topic: str, req_value: bytes, *, req_key: bytes | None = None, req_headers: list[tuple[str, str | bytes]] | None = None, req_headers_reply_to: list[str] | None = None, res_timeout: float = 30.0, res_expect_type: Type[T] | None = None, correlation_id: bytes | None = None, propagate_corr_to: str = "both", correlation_header_key: str = "request_id") -> T`
+  - `request(req_topic: str, req_value: bytes, *, req_key: bytes | None = None, req_headers: list[tuple[str, str | bytes]] | None = None, req_headers_reply_to: list[str] | None = None, res_timeout: float = 30.0, res_expect_type: Type[T] | None = None, correlation_id: bytes | None = None, propagate_corr_to: str = "both", correlation_header_key: str = "x-corr-id") -> T`
 
 License
 -------

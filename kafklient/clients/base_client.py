@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import threading
 import uuid
@@ -7,6 +8,7 @@ from dataclasses import InitVar, dataclass, field
 from functools import partial
 from types import TracebackType
 from typing import (
+    AsyncIterable,
     Callable,
     Iterable,
     Literal,
@@ -23,6 +25,7 @@ from ..types import (
     AdminClient,
     Consumer,
     ConsumerConfig,
+    CorrelationCallback,
     KafkaError,
     Message,
     NewTopic,
@@ -79,15 +82,11 @@ class KafkaBaseClient(ABC):
 
     # ---------- Parser / Correlation ----------
     parsers: Iterable[ParserSpec[object]] = ()
-    corr_header_keys: tuple[str, ...] = (
-        "request_id",
-        "correlation_id",
-        "x-correlation-id",
-    )
-    corr_from_record: InitVar[Optional[Callable[[Message, Optional[object]], Optional[bytes]]]] = None
-    """Correlation key extractor: (record, parsed or None) -> correlation_id (None if not found)"""
+    corr_header_keys: tuple[str, ...] = ("x-corr-id",)
+    corr_from_record: InitVar[Optional[CorrelationCallback]] = None
+    """Correlation key extractor: (record, parsed) -> correlation id (None if not found). Can be sync or async."""
 
-    _corr_from_record: Callable[[Message, Optional[object]], Optional[bytes]] = field(init=False, repr=False)
+    _corr_from_record: CorrelationCallback = field(init=False, repr=False)
     _producer: Optional[Producer] = field(default=None, init=False, repr=False)
     _consumer: Optional[Consumer] = field(default=None, init=False, repr=False)
     _consumer_task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
@@ -106,7 +105,7 @@ class KafkaBaseClient(ABC):
 
     def __post_init__(
         self,
-        corr_from_record: Optional[Callable[[Message, Optional[object]], Optional[bytes]]],
+        corr_from_record: Optional[CorrelationCallback],
     ) -> None:
         # Register parsers and collect static assignments (once at initialization)
         for ps in self.parsers:
@@ -345,30 +344,58 @@ class KafkaBaseClient(ABC):
 
             return self._consumer.poll(timeout), did_seek
 
+        # Parsing + Dispatching
+        async def _parse_record(record: Message) -> AsyncIterable[tuple[tuple[object, Type[object]], Optional[bytes]]]:
+            yielded = False
+            for spec in self._parsers_by_topic.get((topic := record.topic()) or "") or ():
+                try:
+                    # Support async parsers: await if result is awaitable
+                    result: object = spec["parser"](record)
+                    if inspect.isawaitable(result):
+                        result = await result
+                    # Support async correlation extractors: await if result is awaitable
+                    cid_or_awaitable = self._corr_from_record(record, result)
+                    cid: bytes | None = (
+                        await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
+                    )
+                    yield (result, spec["type"]), cid
+                    yielded = True
+                except Exception as ex:
+                    logger.debug(
+                        f"Parser failed (topic={topic}, out={getattr(spec['type'], '__name__', spec['type'])}): {ex}"
+                    )
+            # Fallback: yield raw Message if no parser matched or all parsers failed
+            if not yielded:
+                cid_or_awaitable = self._corr_from_record(record, record)
+                cid = await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
+                yield (record, Message), cid
+
         try:
             while not self._stop_event.is_set():
                 try:
                     if self._consumer is None:
                         break
-                    rec, did_seek = await self._consumer_executor.run(partial(_poll_and_maybe_seek, timeout=0.5))
+                    record, did_seek = await self._consumer_executor.run(partial(_poll_and_maybe_seek, timeout=0.5))
                     if did_seek:
                         # Signal assignment is complete after seek
                         self._assignment_event.set()
                     if self._stop_event.is_set():
                         break
-                    if rec is None:
+                    if record is None:
                         continue
-                    err = rec.error()
+                    err = record.error()
                     if err:
                         if err.code() == KafkaError._PARTITION_EOF:
                             continue
                         logger.error(f"Kafka error: {err}")
                         continue
-                    parsed_candidates, cid = self._parse_record(rec)
-                    try:
-                        await self._on_record(rec, parsed_candidates, cid)
-                    except Exception:
-                        logger.exception("_on_record failed")
+                    # parsed_candidates, cid = await _parse_record(rec)
+                    async for parsed, cid in _parse_record(record):
+                        try:
+                            await self._on_record(record, parsed, cid)
+                        except Exception:
+                            logger.exception("_on_record failed")
+
                     backoff = self.backoff_min
                 except asyncio.CancelledError:
                     raise
@@ -380,31 +407,6 @@ class KafkaBaseClient(ABC):
                     backoff = min(backoff * self.backoff_factor, self.backoff_max)
         except asyncio.CancelledError:
             pass
-
-    # Parsing + Dispatching
-    def _parse_record(self, record: Message) -> tuple[list[tuple[object, Type[object]]], Optional[bytes]]:
-        # (1) Extract correlation_id (before parsing)
-        cid = None
-        try:
-            cid = self._corr_from_record(record, None)
-        except Exception as ex:
-            logger.exception(f"correlation_from_record(None) failed: {ex}")
-
-        # (2) Parsing
-        parsed_candidates: list[tuple[object, Type[object]]] = []
-        for spec in self._parsers_by_topic.get((topic := record.topic()) or "") or ():
-            try:
-                parsed_candidates.append((spec["parser"](record), spec["type"]))
-            except Exception as ex:
-                logger.debug(
-                    f"Parser failed (topic={topic}, out={getattr(spec['type'], '__name__', spec['type'])}): {ex}"
-                )
-
-        # (3) fallback: raw
-        if not parsed_candidates:
-            parsed_candidates.append((record, Message))
-
-        return parsed_candidates, cid
 
     async def _notify_rebalance_listener(
         self,
@@ -431,7 +433,7 @@ class KafkaBaseClient(ABC):
     def _tp_sort_key(tp: TopicPartition) -> tuple[str, int]:
         return (tp.topic, tp.partition)
 
-    def _default_corr_from_record(self, rec: Message, parsed: Optional[object]) -> Optional[bytes]:
+    def _default_corr_from_record(self, rec: Message, parsed: object) -> Optional[bytes]:
         # Default correlation key extractor: Header priority, case-insensitive
         try:
             headers = rec.headers() or []
@@ -464,12 +466,7 @@ class KafkaBaseClient(ABC):
         ]
 
     @abstractmethod
-    async def _on_record(
-        self,
-        record: Message,
-        parsed_candidates: list[tuple[object, Type[object]]],
-        cid: Optional[bytes],
-    ) -> None: ...
+    async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None: ...
 
     @abstractmethod
     async def _on_stop_cleanup(self) -> None: ...
@@ -598,8 +595,18 @@ class KafkaBaseClient(ABC):
 
 
 def create_consumer(config: ConsumerConfig, *, logger: logging.Logger | None = None) -> Consumer:
+    config = config.copy()
+    if "group.id" not in config or not config["group.id"]:
+        config["group.id"] = f"consumer-{uuid.uuid4().hex[:8]}"
+    if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
+        raise ValueError("bootstrap.servers is required")
     return Consumer(dict(config), logger=logger or get_logger(__name__))
 
 
 def create_producer(config: ProducerConfig, *, logger: logging.Logger | None = None) -> Producer:
+    config = config.copy()
+    if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
+        raise ValueError("bootstrap.servers is required")
+    if "client.id" not in config or not config["client.id"]:
+        config["client.id"] = f"producer-{uuid.uuid4().hex[:8]}"
     return Producer(dict(config), logger=logger or get_logger(__name__))

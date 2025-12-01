@@ -2,9 +2,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional, Type, override
-
-from beartype.door import is_bearable
+from typing import Literal, Optional, Type, override
 
 from .._logging import get_logger
 from ..types import KafkaError, Producer, T_Co
@@ -54,15 +52,15 @@ class KafkaRPC(KafkaBaseClient):
         self,
         req_topic: str,
         req_value: bytes,
+        req_headers_reply_to: Optional[list[str]],
         *,
         req_key: Optional[bytes] = None,
         req_headers: Optional[list[tuple[str, str | bytes]]] = None,
-        req_headers_reply_to: Optional[list[str]] = None,
         res_timeout: float = 30.0,
         res_expect_type: Optional[Type[T_Co]] = None,
         correlation_id: Optional[bytes] = None,
-        propagate_corr_to: str = "both",
-        correlation_header_key: str = "request_id",
+        propagate_corr_to: Literal["key", "header", "both"] = "key",
+        correlation_header_key: str = "x-corr-id",
     ) -> T_Co:
         if not req_topic or not req_topic.strip():
             raise ValueError("req_topic must be non-empty")
@@ -79,15 +77,15 @@ class KafkaRPC(KafkaBaseClient):
         # Build message key and headers
         msg_key = req_key
         msg_headers = list(req_headers or [])
-        if propagate_corr_to in ("key", "both") and msg_key is None:
+        # add reply topic to headers
+        for topic in req_headers_reply_to or ():
+            msg_headers.append(("x-reply-topic", topic.encode("utf-8")))
+        # propagate correlation id to key or header
+        if (propagate_corr_to == "key" or propagate_corr_to == "both") and msg_key is None:
             msg_key = corr_id
-        if propagate_corr_to in ("header", "both"):
+        if propagate_corr_to == "header" or propagate_corr_to == "both":
             if not any(k.lower() == correlation_header_key.lower() for k, _ in msg_headers):
                 msg_headers.append((correlation_header_key, corr_id))
-
-        if req_headers_reply_to:
-            for topic in req_headers_reply_to:
-                msg_headers.append(("x-reply-topic", topic.encode("utf-8")))
 
         # Start client if needed
         if self._closed:
@@ -163,7 +161,7 @@ class KafkaRPC(KafkaBaseClient):
     async def _on_record(
         self,
         record: Message,
-        parsed_candidates: list[tuple[object, Type[object]]],
+        parsed: tuple[object, Type[object]],
         cid: Optional[bytes],
     ) -> None:
         if not cid:
@@ -172,25 +170,21 @@ class KafkaRPC(KafkaBaseClient):
         if not waiter or waiter.future.done():
             return
 
-        expect = waiter.expect_type
-        if expect is None:
-            waiter.future.set_result(parsed_candidates[0][0])
+        if waiter.expect_type is None:
+            waiter.future.set_result(parsed[0])
             self.waiters.pop(cid, None)
             return
 
-        for obj, _ in parsed_candidates:
-            try:
-                if is_bearable(obj, expect):  # pyright: ignore[reportArgumentType]
-                    waiter.future.set_result(obj)
-                    self.waiters.pop(cid, None)
-                    return
-            except Exception:
-                pass
+        obj, ot = parsed
+        try:
+            if ot == waiter.expect_type:
+                waiter.future.set_result(obj)
+                self.waiters.pop(cid, None)
+                return
+        except Exception:
+            pass
 
-        logger.debug(
-            f"Response type mismatch for corr_id={cid!r}: "
-            f"expected {expect}, got [{', '.join(str(ot) for _, ot in parsed_candidates)}]"
-        )
+        logger.debug(f"Response type mismatch for corr_id={cid!r}: expected {waiter.expect_type}, got {ot}")
 
     async def _on_stop_cleanup(self) -> None:
         for w in self.waiters.values():

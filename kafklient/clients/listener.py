@@ -38,25 +38,20 @@ class KafkaListener(KafkaBaseClient):
         q, event = self.subscriptions[tp]
         return TypeStream[T_Co](cast(asyncio.Queue[T_Co], q), event)
 
-    async def _on_record(
-        self,
-        record: Message,
-        parsed_candidates: list[tuple[object, Type[object]]],
-        cid: Optional[bytes],
-    ) -> None:
-        for obj, ot in parsed_candidates:
-            q_event = self.subscriptions.get(ot)
-            if q_event is None:
-                continue
-            q, _event = q_event
+    async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None:
+        obj, ot = parsed
+        q_event = self.subscriptions.get(ot)
+        if q_event is None:
+            return
+        q, _event = q_event
+        try:
+            q.put_nowait(obj)
+        except asyncio.QueueFull:
             try:
+                q.get_nowait()
                 q.put_nowait(obj)
-            except asyncio.QueueFull:
-                try:
-                    q.get_nowait()
-                    q.put_nowait(obj)
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
     async def _on_stop_cleanup(self) -> None:
         for _q, event in self.subscriptions.values():

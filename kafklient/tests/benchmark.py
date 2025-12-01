@@ -184,25 +184,20 @@ async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
             if msg is None or msg.error():
                 continue
 
-            headers = msg.headers() or []
-            reply_to: str | None = None
-            corr_id: bytes | None = None
-            for k, v in headers:
-                if k == "x-reply-topic":
-                    reply_to = v.decode()
-                if k.lower() == "request_id":
-                    corr_id = v
+            corr_id: bytes | None = msg.key()
+            if not corr_id:
+                raise ValueError("Correlation ID is required")
 
-            if reply_to:
-                reply_headers: list[tuple[str, str | bytes]] = [("request_id", corr_id)] if corr_id else []
-                reply_topic_name = reply_to
-                reply_value = msg.value() or b""
+            def send(reply_topic_name: str, reply_value: bytes, reply_headers: list[tuple[str, str | bytes]]) -> None:
+                producer.produce(reply_topic_name, value=reply_value, headers=reply_headers)
+                producer.flush()
 
-                def send() -> None:
-                    producer.produce(reply_topic_name, value=reply_value, headers=reply_headers)
-                    producer.flush()
-
-                await asyncio.to_thread(send)
+            await asyncio.to_thread(
+                send,
+                reply_topic_name=next((v.decode() for k, v in (msg.headers() or ()) if k == "x-reply-topic")),
+                reply_value=msg.value() or b"",
+                reply_headers=[("x-corr-id", corr_id)],
+            )
 
         consumer.close()
 
