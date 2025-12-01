@@ -3,6 +3,7 @@ from .clients import (
     KafkaBaseClient,
     KafkaListener,
     KafkaRPC,
+    KafkaRPCServer,
     create_consumer,
     create_producer,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "KafkaBaseClient",
     "KafkaListener",
     "KafkaRPC",
+    "KafkaRPCServer",
     "create_consumer",
     "create_producer",
     "ParserSpec",

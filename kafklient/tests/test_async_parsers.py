@@ -157,7 +157,7 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
         await ensure_topic_exists(topic)
 
         # Lambda that calls async function - returns coroutine
-        lambda_parser: Callable[[Message], Awaitable[ParsedMessage]] = lambda r: async_parser(r)
+        lambda_parser: Callable[[Message], Awaitable[ParsedMessage]] = lambda r: async_parser(r)  # noqa: E731
 
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
@@ -261,7 +261,7 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
         await ensure_topic_exists(topic)
 
         # Lambda that calls async function - returns coroutine
-        lambda_corr: Callable[[Message, object], Awaitable[bytes | None]] = lambda r, p: async_corr(r, p)
+        lambda_corr: Callable[[Message, object], Awaitable[bytes | None]] = lambda r, p: async_corr(r, p)  # noqa: E731
 
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
@@ -342,7 +342,7 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
         topic, group_id = get_topic_and_group_id(self.test_lambda_parser_with_partial_corr)
         await ensure_topic_exists(topic)
 
-        lambda_parser: Callable[[Message], Awaitable[ParsedMessage]] = lambda r: async_parser(r)
+        lambda_parser: Callable[[Message], Awaitable[ParsedMessage]] = lambda r: async_parser(r)  # noqa: E731
         partial_corr = partial(async_corr_with_arg, prefix="combo")
 
         client = AsyncParserTestClient(
@@ -372,7 +372,7 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
         await ensure_topic_exists(topic)
 
         partial_parser = partial(async_parser_with_arg, extra="mixed")
-        lambda_corr: Callable[[Message, object], Awaitable[bytes | None]] = lambda r, p: async_corr(r, p)
+        lambda_corr: Callable[[Message, object], Awaitable[bytes | None]] = lambda r, p: async_corr(r, p)  # noqa: E731
 
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),

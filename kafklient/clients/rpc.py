@@ -1,8 +1,9 @@
 import asyncio
+import inspect
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Type, override
+from typing import Awaitable, Callable, Literal, Optional, Type, Union, override
 
 from .._logging import get_logger
 from ..types import KafkaError, Producer, T_Co
@@ -11,6 +12,9 @@ from ..utils.task import Waiter
 from .base_client import KafkaBaseClient, PartitionListener
 
 logger: logging.Logger = get_logger(__name__)
+
+# Handler type: sync or async function that takes parsed request and returns response bytes
+RequestHandler = Callable[[object, Message], Union[bytes, Awaitable[bytes]]]
 
 
 class _RPCRebalanceListener(PartitionListener):
@@ -43,8 +47,6 @@ class KafkaRPC(KafkaBaseClient):
     - Responses are matched by correlation_id
     """
 
-    # Seek to end on assign to ensure we only receive new responses
-    seek_to_end_on_assign: bool = True
     rebalance_listener: Optional[PartitionListener] = field(default_factory=_RPCRebalanceListener)
     waiters: dict[bytes, Waiter[object]] = field(default_factory=dict[bytes, Waiter[object]], init=False, repr=False)
 
@@ -192,3 +194,186 @@ class KafkaRPC(KafkaBaseClient):
                 w.future.set_exception(RuntimeError("Client stopped before response"))
         self.waiters.clear()
         self._consumer_ready = False
+
+
+@dataclass
+class KafkaRPCServer(KafkaBaseClient):
+    """
+    RPC server that listens for requests and sends responses via Kafka.
+
+    - Request topics are defined via ParserSpec.topics
+    - Response topics are extracted from the `x-reply-topic` header of incoming requests
+    - Responses are matched by correlation_id (propagated from request key or header)
+
+    Usage:
+        server = KafkaRPCServer(
+            consumer_config={"bootstrap.servers": "localhost:9092", "group.id": "my-server"},
+            producer_config={"bootstrap.servers": "localhost:9092"},
+            parsers=[ParserSpec(topics=["requests"], type=MyRequest, parser=parse_request)],
+        )
+
+        @server.handler(MyRequest)
+        async def handle_request(request: MyRequest, message: Message) -> bytes:
+            return json.dumps({"result": "ok"}).encode()
+
+        await server.start()
+    """
+
+    # Reply topic header key
+    reply_topic_header_key: str = "x-reply-topic"
+
+    # Correlation ID header key for responses
+    correlation_header_key: str = "x-corr-id"
+
+    # Whether to propagate correlation ID to response key, header, or both
+    propagate_corr_to: Literal["key", "header", "both"] = "key"
+
+    # Registered handlers: type -> handler function
+    _handlers: dict[Type[object], RequestHandler] = field(
+        default_factory=dict[Type[object], RequestHandler], init=False, repr=False
+    )
+
+    def handler(
+        self,
+        request_type: Type[T_Co],
+    ) -> Callable[
+        [Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]]],
+        Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]],
+    ]:
+        """
+        Decorator to register a handler for a specific request type.
+
+        Example:
+            @server.handler(MyRequest)
+            async def handle_request(request: MyRequest, message: Message) -> bytes:
+                return json.dumps({"result": "ok"}).encode()
+        """
+
+        def decorator(
+            func: Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]],
+        ) -> Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]]:
+            self._handlers[request_type] = func  # pyright: ignore[reportArgumentType]
+            return func
+
+        return decorator
+
+    def register_handler(
+        self,
+        request_type: Type[T_Co],
+        handler: Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]],
+    ) -> None:
+        """
+        Register a handler for a specific request type programmatically.
+
+        Example:
+            async def handle_request(request: MyRequest, message: Message) -> bytes:
+                return json.dumps({"result": "ok"}).encode()
+
+            server.register_handler(MyRequest, handle_request)
+        """
+        self._handlers[request_type] = handler  # pyright: ignore[reportArgumentType]
+
+    async def _on_record(
+        self,
+        record: Message,
+        parsed: tuple[object, Type[object]],
+        cid: Optional[bytes],
+    ) -> None:
+        obj, obj_type = parsed
+
+        # Find handler for this type
+        handler = self._handlers.get(obj_type)
+        if handler is None:
+            logger.debug(f"No handler registered for type {obj_type.__name__}")
+            return
+
+        # Extract reply topic from headers
+        reply_topics = self._extract_reply_topics(record)
+        if not reply_topics:
+            logger.debug(f"No reply topic found in message headers (corr_id={cid!r})")
+            return
+
+        # Execute handler
+        try:
+            result = handler(obj, record)
+            if inspect.isawaitable(result):
+                response_bytes = await result
+            else:
+                response_bytes = result
+        except Exception as e:
+            logger.exception(f"Handler failed for type {obj_type.__name__} (corr_id={cid!r})")
+            # Optionally send error response
+            response_bytes = f'{{"error": "{str(e)}"}}'.encode("utf-8")
+
+        # Send response to all reply topics
+        producer = await self.producer
+        for reply_topic in reply_topics:
+            try:
+                await self._produce_response(
+                    producer,
+                    topic=reply_topic,
+                    value=response_bytes,
+                    correlation_id=cid,
+                )
+                logger.debug(f"Sent response to {reply_topic} (corr_id={cid!r})")
+            except Exception:
+                logger.exception(f"Failed to send response to {reply_topic} (corr_id={cid!r})")
+
+    def _extract_reply_topics(self, record: Message) -> list[str]:
+        """Extract reply topic(s) from message headers."""
+        reply_topics: list[str] = []
+        headers = record.headers() or []
+        for key, value in headers:
+            if key.lower() == self.reply_topic_header_key.lower():
+                try:
+                    reply_topics.append(value.decode("utf-8"))
+                except Exception:
+                    pass
+        return reply_topics
+
+    async def _produce_response(
+        self,
+        producer: Producer,
+        *,
+        topic: str,
+        value: bytes,
+        correlation_id: Optional[bytes],
+    ) -> None:
+        """Produce response message with correlation ID."""
+        loop = asyncio.get_running_loop()
+        delivery_future: asyncio.Future[Message | None] = loop.create_future()
+
+        def _on_delivery(err: Optional[KafkaError], msg: Message) -> None:
+            if err:
+                if not delivery_future.done():
+                    loop.call_soon_threadsafe(delivery_future.set_exception, KafkaException(err))
+            else:
+                if not delivery_future.done():
+                    loop.call_soon_threadsafe(delivery_future.set_result, msg)
+
+        # Build key and headers based on propagate_corr_to setting
+        msg_key: Optional[bytes] = None
+        msg_headers: list[tuple[str, str | bytes]] = []
+
+        if correlation_id:
+            if self.propagate_corr_to == "key" or self.propagate_corr_to == "both":
+                msg_key = correlation_id
+            if self.propagate_corr_to == "header" or self.propagate_corr_to == "both":
+                msg_headers.append((self.correlation_header_key, correlation_id))
+
+        def _produce_and_flush() -> None:
+            producer.produce(
+                topic,
+                value=value,
+                key=msg_key,
+                headers=msg_headers if msg_headers else None,
+                on_delivery=_on_delivery,
+            )
+            producer.flush()
+
+        await self._producer_executor.run(_produce_and_flush)
+        await delivery_future
+
+    async def _on_stop_cleanup(self) -> None:
+        """Cleanup on server stop."""
+        pass

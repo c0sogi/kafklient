@@ -8,19 +8,22 @@ Run with: python test.py
 import asyncio
 import json
 import uuid
-from typing import Callable, Sequence
+from dataclasses import dataclass
+from typing import Callable, Coroutine, Sequence
 
 from kafklient import (
     AdminClient,
     Consumer,
     ConsumerConfig,
+    KafkaRPCServer,
+    Message,
     NewTopic,
     Producer,
     ProducerConfig,
     create_consumer,
 )
 
-from ._config import KAFKA_BOOTSTRAP
+from ._config import KAFKA_BOOTSTRAP, TEST_TIMEOUT
 
 
 def loads_json(value: bytes | None) -> dict[str, object]:
@@ -119,16 +122,14 @@ async def produce_messages(
 
 def make_ready_consumer(group_id: str, topics: list[str]) -> Consumer:
     """Create a consumer that's ready to receive messages (already subscribed and stabilized)."""
-    consumer = create_consumer(
-        {
-            "bootstrap.servers": KAFKA_BOOTSTRAP,
-            "group.id": group_id,
-            "auto.offset.reset": "latest",
-            "enable.auto.commit": False,
-            "session.timeout.ms": 6000,
-            "heartbeat.interval.ms": 1000,
-        }
-    )
+    consumer = create_consumer({
+        "bootstrap.servers": KAFKA_BOOTSTRAP,
+        "group.id": group_id,
+        "auto.offset.reset": "latest",
+        "enable.auto.commit": False,
+        "session.timeout.ms": 6000,
+        "heartbeat.interval.ms": 1000,
+    })
     consumer.subscribe(topics)
     # Poll until assigned and stabilized (Windows needs ~3s)
     for _ in range(50):
@@ -136,3 +137,90 @@ def make_ready_consumer(group_id: str, topics: list[str]) -> Consumer:
         if consumer.assignment():
             break
     return consumer
+
+
+# Request types for RPC servers
+@dataclass
+class EchoRequest:
+    """Raw bytes echo request"""
+
+    data: bytes
+
+
+@dataclass
+class JsonEchoRequest:
+    """JSON echo request"""
+
+    action: str
+    value: int
+
+
+def parse_echo_request(msg: Message) -> EchoRequest:
+    """Parse raw bytes request"""
+    return EchoRequest(data=msg.value() or b"")
+
+
+def parse_json_echo_request(msg: Message) -> JsonEchoRequest:
+    """Parse JSON request"""
+    data = loads_json(msg.value())
+    return JsonEchoRequest(
+        action=as_str(data.get("action")),
+        value=as_int(data.get("value")),
+    )
+
+
+def create_echo_rpc_server(
+    server_group: str, request_topic: str, *, server_ready: asyncio.Event, server_stop: asyncio.Event
+) -> Callable[[], Coroutine[None, None, None]]:
+    """Create an echo RPC server using KafkaRPCServer."""
+
+    async def echo_server() -> None:
+
+        server = KafkaRPCServer(
+            consumer_config=make_consumer_config(server_group),
+            producer_config=make_producer_config(),
+            parsers=[{"topics": [request_topic], "type": EchoRequest, "parser": parse_echo_request}],
+        )
+
+        @server.handler(EchoRequest)
+        async def echo(request: EchoRequest, message: Message) -> bytes:  # pyright: ignore[reportUnusedFunction]
+            return request.data
+
+        await server.start()
+        server_ready.set()
+        await asyncio.wait_for(server_stop.wait(), timeout=TEST_TIMEOUT)
+        await server.stop()
+
+    return echo_server
+
+
+def create_json_echo_server(
+    server_group: str, request_topic: str, *, server_ready: asyncio.Event, server_stop: asyncio.Event
+) -> Callable[[], Coroutine[None, None, None]]:
+    """Create a JSON echo RPC server using KafkaRPCServer."""
+
+    async def json_server() -> None:
+
+        server = KafkaRPCServer(
+            consumer_config=make_consumer_config(server_group),
+            producer_config=make_producer_config(),
+            parsers=[{"topics": [request_topic], "type": JsonEchoRequest, "parser": parse_json_echo_request}],
+        )
+
+        @server.handler(JsonEchoRequest)
+        async def handle_json_echo(request: JsonEchoRequest, message: Message) -> bytes:  # pyright: ignore[reportUnusedFunction]
+            return json.dumps({
+                "status": "ok",
+                "echo": {
+                    "action": request.action,
+                    "value": request.value,
+                },
+                "server": "json-server",
+            }).encode()
+
+        await server.start()
+        server_ready.set()
+        await asyncio.wait_for(server_stop.wait(), timeout=TEST_TIMEOUT)
+        await server.stop()
+
+    return json_server

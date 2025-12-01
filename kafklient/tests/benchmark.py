@@ -17,10 +17,10 @@ from kafklient import KafkaListener, KafkaRPC, Message, ParserSpec, create_produ
 
 from ._config import KAFKA_BOOTSTRAP
 from ._utils import (
+    create_echo_rpc_server,
     ensure_topic_exists,
     make_consumer_config,
     make_producer_config,
-    make_ready_consumer,
 )
 
 
@@ -171,37 +171,9 @@ async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
     server_stop = asyncio.Event()
     server_ready = asyncio.Event()
 
-    async def echo_server() -> None:
-        consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
-        producer = create_producer(make_producer_config())
-        server_ready.set()
-
-        def poll_one() -> Message | None:
-            return consumer.poll(0.1)
-
-        while not server_stop.is_set():
-            msg = await asyncio.to_thread(poll_one)
-            if msg is None or msg.error():
-                continue
-
-            corr_id: bytes | None = msg.key()
-            if not corr_id:
-                raise ValueError("Correlation ID is required")
-
-            def send(reply_topic_name: str, reply_value: bytes, reply_headers: list[tuple[str, str | bytes]]) -> None:
-                producer.produce(reply_topic_name, value=reply_value, headers=reply_headers)
-                producer.flush()
-
-            await asyncio.to_thread(
-                send,
-                reply_topic_name=next((v.decode() for k, v in (msg.headers() or ()) if k == "x-reply-topic")),
-                reply_value=msg.value() or b"",
-                reply_headers=[("x-corr-id", corr_id)],
-            )
-
-        consumer.close()
-
-    server_task = asyncio.create_task(echo_server())
+    server_task = asyncio.create_task(
+        create_echo_rpc_server(server_group, request_topic, server_ready=server_ready, server_stop=server_stop)()
+    )
     latencies: list[float] = []
 
     try:

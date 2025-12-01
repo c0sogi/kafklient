@@ -4,19 +4,19 @@ import unittest
 from time import perf_counter
 from typing import cast
 
-from kafklient import KafkaRPC, Message, create_producer, logger
-
+from kafklient import KafkaRPC, Message, logger
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._schema import EchoPayload, RPCResponsePayload
 from kafklient.tests._utils import (
     as_int,
     as_str,
+    create_echo_rpc_server,
+    create_json_echo_server,
     ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
     make_consumer_config,
     make_producer_config,
-    make_ready_consumer,
 )
 
 
@@ -41,46 +41,9 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         server_ready = asyncio.Event()
         server_stop = asyncio.Event()
 
-        async def echo_server() -> None:
-            consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
-            producer = create_producer(make_producer_config())
-            server_ready.set()
-
-            def poll_one() -> Message | None:
-                return consumer.poll(0.1)
-
-            while not server_stop.is_set():
-                msg = await asyncio.to_thread(poll_one)
-                if msg is None or msg.error():
-                    continue
-
-                headers = msg.headers() or []
-                reply_to: str | None = None
-                corr_id: bytes | None = None
-                for k, v in headers:
-                    if k == "x-reply-topic":
-                        reply_to = v.decode()
-                    if k.lower() == "x-corr-id":
-                        corr_id = v
-
-                if reply_to:
-                    reply_headers: list[tuple[str, str | bytes]] = [("x-corr-id", corr_id)] if corr_id else []
-                    reply_value = msg.value() or b""
-                    reply_topic_name = reply_to
-
-                    def send() -> None:
-                        producer.produce(
-                            reply_topic_name,
-                            value=reply_value,
-                            headers=reply_headers,
-                        )
-                        producer.flush()
-
-                    await asyncio.to_thread(send)
-
-            consumer.close()
-
-        server_task = asyncio.create_task(echo_server())
+        server_task = asyncio.create_task(
+            create_echo_rpc_server(server_group, request_topic, server_ready=server_ready, server_stop=server_stop)()
+        )
 
         try:
             # Wait for server to be ready (partition assigned)
@@ -165,56 +128,9 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         server_ready = asyncio.Event()
         server_stop = asyncio.Event()
 
-        async def json_server() -> None:
-            consumer = await asyncio.to_thread(make_ready_consumer, server_group, [request_topic])
-            producer = create_producer(make_producer_config())
-            server_ready.set()
-
-            def poll_one() -> Message | None:
-                return consumer.poll(0.1)
-
-            while not server_stop.is_set():
-                msg = await asyncio.to_thread(poll_one)
-                if msg is None or msg.error():
-                    continue
-
-                headers = msg.headers() or []
-                reply_to: str | None = None
-                corr_id: bytes | None = None
-                for k, v in headers:
-                    if k == "x-reply-topic":
-                        reply_to = v.decode()
-                    if k.lower() == "x-corr-id":
-                        corr_id = v
-
-                if reply_to:
-                    req_data = loads_json(msg.value())
-                    response_bytes = json.dumps(
-                        {
-                            "status": "ok",
-                            "echo": {
-                                "action": as_str(req_data.get("action")),
-                                "value": as_int(req_data.get("value")),
-                            },
-                            "server": "json-server",
-                        }
-                    ).encode()
-                    reply_headers: list[tuple[str, str | bytes]] = [("x-corr-id", corr_id)] if corr_id else []
-                    reply_topic_name = reply_to
-
-                    def send() -> None:
-                        producer.produce(
-                            reply_topic_name,
-                            value=response_bytes,
-                            headers=reply_headers,
-                        )
-                        producer.flush()
-
-                    await asyncio.to_thread(send)
-
-            consumer.close()
-
-        server_task = asyncio.create_task(json_server())
+        server_task = asyncio.create_task(
+            create_json_echo_server(server_group, request_topic, server_ready=server_ready, server_stop=server_stop)()
+        )
 
         try:
             await server_ready.wait()
