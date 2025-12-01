@@ -11,15 +11,13 @@ import unittest
 import uuid
 from time import perf_counter
 
-from kafklient import KafkaListener, Message, ParserSpec, logger
-
+from kafklient import KafkaListener, Message, logger
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._schema import FlagRecord, HelloRecord, IdxRecord
 from kafklient.tests._utils import (
     as_bool,
     as_int,
     as_str,
-    ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
     make_consumer_config,
@@ -32,9 +30,6 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
         """Test that KafkaListener can receive and parse messages."""
         topic, group_id = get_topic_and_group_id(self.test_listener_receives_messages)
 
-        # Create topic first
-        await ensure_topic_exists(topic)
-
         # Define a simple parser
         def parse_hello(rec: Message) -> HelloRecord:
             data = loads_json(rec.value())
@@ -42,17 +37,16 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
             count = as_int(data.get("count"))
             return HelloRecord(message=message, count=count)
 
-        specs: list[ParserSpec[HelloRecord]] = [
-            {
-                "topics": [topic],
-                "type": HelloRecord,
-                "parser": parse_hello,
-            }
-        ]
-
         listener = KafkaListener(
-            parsers=specs,
+            parsers=[
+                {
+                    "topics": [topic],
+                    "type": HelloRecord,
+                    "parser": parse_hello,
+                }
+            ],
             consumer_config=make_consumer_config(group_id),
+            auto_create_topics=True,
         )
 
         try:
@@ -89,9 +83,6 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
         topic = self.test_listener_multiple_messages.__name__
         group_id = f"listener-multi-{uuid.uuid4().hex}"
 
-        # Create topic first
-        await ensure_topic_exists(topic)
-
         def parse_idx(rec: Message) -> IdxRecord:
             data = loads_json(rec.value())
             return IdxRecord(idx=as_int(data.get("idx")))
@@ -105,6 +96,7 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
                 }
             ],
             consumer_config=make_consumer_config(group_id),
+            auto_create_topics=True,
         )
 
         try:
@@ -152,24 +144,20 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
         topic = self.test_listener_context_manager.__name__
         group_id = f"listener-ctx-{uuid.uuid4().hex}"
 
-        # Create topic first
-        await ensure_topic_exists(topic)
-
         def parse_flag(rec: Message) -> FlagRecord:
             data = loads_json(rec.value())
             return FlagRecord(test=as_bool(data.get("test")))
 
-        specs: list[ParserSpec[FlagRecord]] = [
-            {
-                "topics": [topic],
-                "type": FlagRecord,
-                "parser": parse_flag,
-            }
-        ]
-
         async with KafkaListener(
-            parsers=specs,
+            parsers=[
+                {
+                    "topics": [topic],
+                    "type": FlagRecord,
+                    "parser": parse_flag,
+                }
+            ],
             consumer_config=make_consumer_config(group_id),
+            auto_create_topics=True,
         ) as listener:
             stream = await listener.subscribe(FlagRecord)
 

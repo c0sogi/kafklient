@@ -4,8 +4,7 @@ import logging
 import threading
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import InitVar, dataclass, field
-from functools import partial
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import (
     AsyncIterable,
@@ -53,103 +52,138 @@ def default_consumer_config() -> ConsumerConfig:
     return {"bootstrap.servers": "127.0.0.1:9092", "auto.offset.reset": "latest"}
 
 
-@dataclass
+def default_corr_from_record(rec: Message, parsed: object) -> Optional[bytes]:
+    if key := rec.key():
+        return bytes(key)
+    return next((bytes(v) for k, v in rec.headers() or () if k.lower() == "x-corr-id"), None)
+
+
+def create_consumer(config: ConsumerConfig, *, logger: logging.Logger | None = None) -> Consumer:
+    config = config.copy()
+    if "group.id" not in config or not config["group.id"]:
+        config["group.id"] = f"consumer-{uuid.uuid4().hex[:8]}"
+    if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
+        raise ValueError("bootstrap.servers is required")
+    return Consumer(dict(config), logger=logger or get_logger(__name__))
+
+
+def create_producer(config: ProducerConfig, *, logger: logging.Logger | None = None) -> Producer:
+    config = config.copy()
+    if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
+        raise ValueError("bootstrap.servers is required")
+    if "client.id" not in config or not config["client.id"]:
+        config["client.id"] = f"producer-{uuid.uuid4().hex[:8]}"
+    return Producer(dict(config), logger=logger or get_logger(__name__))
+
+
+@dataclass(kw_only=True)
 class KafkaBaseClient(ABC):
     """
     Group-managed subscription mode powered by sync Consumer/Producer
-    with asyncio.to_thread() for non-blocking async API
     """
 
+    # Main Configuration
+    parsers: Iterable[ParserSpec[object]]
+    """List of parser specs by topic. Each spec contains:
+    - topics: list of topics to parse
+    - type: type of the parsed object
+    - parser: parser callback (sync or async)
+    """
+    corr_from_record: CorrelationCallback = field(default=default_corr_from_record)
+    """Correlation key extractor: (record, parsed) -> correlation id (None if not found). Can be sync or async."""
     producer_config: ProducerConfig = field(default_factory=default_producer_config)
+    """Producer configuration."""
     consumer_config: ConsumerConfig = field(default_factory=default_consumer_config)
+    """Consumer configuration."""
 
-    # ---------- Behavior ----------
-    seek_to_end_on_assign: bool = True  # 새 메시지부터
+    # Behavior
+    seek_to_end_on_assign: bool = True
+    """Seek to end on partition assignment."""
     metadata_refresh_min_interval_s: float = 5.0
+    """Minimum interval for metadata refresh."""
     backoff_min: float = 0.5
+    """Minimum backoff time."""
     backoff_max: float = 10.0
+    """Maximum backoff time."""
     backoff_factor: float = 2.0
+    """Backoff factor."""
     assignment_timeout_s: float = 5.0
+    """Assignment timeout."""
     rebalance_listener: Optional[PartitionListener] = None
+    """Rebalance listener."""
 
-    # ---------- Auto Topic Creation ----------
+    # Auto Topic Creation
     auto_create_topics: bool = False
     """Automatically create topics if they don't exist before subscribing."""
     topic_num_partitions: int = 1
     """Number of partitions for auto-created topics."""
     topic_replication_factor: int = 1
     """Replication factor for auto-created topics."""
+    topic_create_timeout: float = 10.0
+    """Timeout for topic creation."""
+    polling_timeout: float = 0.5
+    """Timeout for polling."""
 
-    # ---------- Parser / Correlation ----------
-    parsers: Iterable[ParserSpec[object]] = ()
-    corr_header_keys: tuple[str, ...] = ("x-corr-id",)
-    corr_from_record: InitVar[Optional[CorrelationCallback]] = None
-    """Correlation key extractor: (record, parsed) -> correlation id (None if not found). Can be sync or async."""
-
-    _corr_from_record: CorrelationCallback = field(init=False, repr=False)
+    # Internal State
+    _loop: Optional[asyncio.AbstractEventLoop] = field(default=None, init=False, repr=False)
     _producer: Optional[Producer] = field(default=None, init=False, repr=False)
     _consumer: Optional[Consumer] = field(default=None, init=False, repr=False)
     _consumer_task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
-    _closed: bool = field(default=True, init=False, repr=False)
     _assigned_partitions: list[TopicPartition] = field(default_factory=list[TopicPartition], init=False, repr=False)
     _assignment_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
     _start_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
-    _parsers_by_topic: dict[str, list[ParserSpec[object]]] = field(
-        default_factory=dict[str, list[ParserSpec[object]]], init=False, repr=False
-    )
-    _subscription_topics: set[str] = field(default_factory=set[str], init=False, repr=False)
     _pending_seek_partitions: list[TopicPartition] = field(default_factory=list[TopicPartition], init=False, repr=False)
-    _consumer_executor: DedicatedThreadExecutor = field(init=False, repr=False)
-    _producer_executor: DedicatedThreadExecutor = field(init=False, repr=False)
-
-    def __post_init__(
-        self,
-        corr_from_record: Optional[CorrelationCallback],
-    ) -> None:
-        # Register parsers and collect static assignments (once at initialization)
-        for ps in self.parsers:
-            # Build topic index and subscription topics (ignore explicit partitioning)
-            for topic in ps["topics"]:
-                self._parsers_by_topic.setdefault(topic, []).append(ps)
-                self._subscription_topics.add(topic)
-
-        # Event loop reference for thread-safe callback scheduling
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-
-        # Dedicated thread executors for thread-unsafe Kafka operations
-        # Separate threads for consumer and producer to avoid blocking
-        self._consumer_executor = DedicatedThreadExecutor(name=f"{self.__class__.__name__}-consumer")
-        self._producer_executor = DedicatedThreadExecutor(name=f"{self.__class__.__name__}-producer")
-
-        # Default correlation key extractor: case-insensitive
-        if corr_from_record is None:
-            self._corr_from_record = self._default_corr_from_record
-        else:
-            self._corr_from_record = corr_from_record
+    _consumer_executor: DedicatedThreadExecutor = field(default_factory=DedicatedThreadExecutor, init=False, repr=False)
+    _producer_executor: DedicatedThreadExecutor = field(default_factory=DedicatedThreadExecutor, init=False, repr=False)
 
     # ---------- Lifecycle ----------
+
+    @property
+    def closed(self) -> bool:
+        if self._loop is None or self._loop.is_closed():
+            return True
+        if self._consumer_task is None or self._consumer_task.done():
+            return True
+        if not self._consumer_executor.is_running or not self._producer_executor.is_running:
+            return True
+        return False
+
+    async def ready(self, *, timeout: float | None = None) -> None:
+        """Ensure the consumer has an assignment before proceeding.
+        Raises TimeoutError if the assignment is not received within the timeout.
+        """
+        if not self.subscribed_topics:
+            return
+        await self.consumer
+        if timeout is None:
+            timeout = self.assignment_timeout_s
+        await asyncio.wait_for(self._assignment_event.wait(), timeout=timeout)
+
     @final
     async def start(self, *, timeout: float | None = None) -> None:
-        if not self._closed:
+        if not self.closed:
             return
 
         self._loop = asyncio.get_running_loop()
         self._stop_event.clear()
-        self._consumer_executor.start(self._loop)
-        self._producer_executor.start(self._loop)
+        self._consumer_executor.start(self._loop, name=f"{self.__class__.__name__}-consumer")
+        self._producer_executor.start(self._loop, name=f"{self.__class__.__name__}-producer")
 
         # Auto-create topics if enabled
-        if self.auto_create_topics and self._subscription_topics:
-            await self._ensure_topics_exist(list(self._subscription_topics))
+        if self.auto_create_topics and self.subscribed_topics:
+            await self.create_topics(
+                *self.subscribed_topics,
+                timeout=self.topic_create_timeout,
+                num_partitions=self.topic_num_partitions,
+                replication_factor=self.topic_replication_factor,
+            )
 
         await self.ready(timeout=timeout)
-
-        self._closed = False
         logger.info(f"{self.__class__.__name__} started")
 
     async def stop(self) -> None:
-        if self._closed:
+        if self.closed:
             return
 
         # Signal consumer loop to stop
@@ -191,7 +225,6 @@ class KafkaBaseClient(ABC):
         except Exception:
             logger.exception("_on_stop_cleanup failed")
 
-        self._closed = True
         self._loop = None
         logger.info(f"{self.__class__.__name__} stopped")
 
@@ -206,17 +239,6 @@ class KafkaBaseClient(ABC):
         tb: Optional[TracebackType],
     ) -> None:
         await self.stop()
-
-    async def ready(self, *, timeout: float | None = None) -> None:
-        """Ensure the consumer has an assignment before proceeding.
-        Raises TimeoutError if the assignment is not received within the timeout.
-        """
-        if not self._subscription_topics:
-            return
-        await self.consumer
-        if timeout is None:
-            timeout = self.assignment_timeout_s
-        await asyncio.wait_for(self._assignment_event.wait(), timeout=timeout)
 
     @property
     def producer_factory(self) -> Callable[[], Producer]:
@@ -257,14 +279,42 @@ class KafkaBaseClient(ABC):
                 return self._consumer
             self._consumer = await self._consumer_executor.run(self.consumer_factory)
 
+            async def _notify_rebalance_listener(
+                method_name: Literal["on_partitions_assigned", "on_partitions_revoked", "on_partitions_lost"],
+                partitions: list[TopicPartition],
+            ) -> None:
+                listener: PartitionListener | None = self.rebalance_listener
+                if not listener:
+                    return
+                try:
+                    match method_name:
+                        case "on_partitions_assigned":
+                            await listener.on_partitions_assigned(partitions)
+                        case "on_partitions_revoked":
+                            await listener.on_partitions_revoked(partitions)
+                        case "on_partitions_lost":
+                            await listener.on_partitions_lost(partitions)
+                        case _:  # pyright: ignore[reportUnnecessaryComparison]
+                            return
+                except Exception:
+                    logger.exception(f"Rebalance listener {method_name} failed")
+
             # Sync callbacks that schedule async handlers (runs on dedicated thread)
             def _on_assign(consumer: Consumer, partitions: list[TopicPartition]) -> None:
+                async def _handle_assign(partitions: list[TopicPartition]) -> None:
+                    """Handle partition assignment notification (seek is done in consume loop)"""
+                    await _notify_rebalance_listener("on_partitions_assigned", partitions)
+                    # If seek_to_end_on_assign is False, set event immediately
+                    # Otherwise, _consume_loop will set it after seek completes
+                    if not self.seek_to_end_on_assign and partitions:
+                        self._assignment_event.set()
+
                 self._assigned_partitions = sorted(partitions, key=self._tp_sort_key)
                 # Store partitions for seek in consume loop (seek fails if called during callback)
                 if self.seek_to_end_on_assign and partitions:
                     self._pending_seek_partitions = list(partitions)
                 if self._loop and not self._stop_event.is_set():
-                    asyncio.run_coroutine_threadsafe(self._handle_assign(partitions), self._loop)
+                    asyncio.run_coroutine_threadsafe(_handle_assign(partitions), self._loop)
 
             def _on_revoke(consumer: Consumer, partitions: list[TopicPartition]) -> None:
                 revoked = {(tp.topic, tp.partition) for tp in partitions}
@@ -275,7 +325,7 @@ class KafkaBaseClient(ABC):
                     self._assignment_event.clear()
                 if self._loop and not self._stop_event.is_set():
                     asyncio.run_coroutine_threadsafe(
-                        self._notify_rebalance_listener("on_partitions_revoked", partitions),
+                        _notify_rebalance_listener("on_partitions_revoked", partitions),
                         self._loop,
                     )
 
@@ -288,17 +338,107 @@ class KafkaBaseClient(ABC):
                     self._assignment_event.clear()
                 if self._loop and not self._stop_event.is_set():
                     asyncio.run_coroutine_threadsafe(
-                        self._notify_rebalance_listener("on_partitions_lost", partitions),
+                        _notify_rebalance_listener("on_partitions_lost", partitions),
                         self._loop,
                     )
 
-            if self._subscription_topics:
+            async def _consume_loop() -> None:
+                backoff = self.backoff_min
+
+                def _poll_and_maybe_seek() -> tuple[Message | None, bool]:
+                    """Poll consumer, and seek if pending partitions exist. Returns (message, did_seek)."""
+                    if self._consumer is None or self._stop_event.is_set():
+                        return None, False
+
+                    # Check for pending seek partitions (set during on_assign callback)
+                    did_seek = False
+                    if self._pending_seek_partitions:
+                        partitions_to_seek = self._pending_seek_partitions
+                        self._pending_seek_partitions = []
+                        for tp in partitions_to_seek:
+                            try:
+                                self._consumer.seek(TopicPartition(tp.topic, tp.partition, OFFSET_END))
+                            except Exception as e:
+                                logger.debug(f"seek_to_end skipped (partition not ready): {e}")
+                        # Poll once after seek to apply it before returning
+                        self._consumer.poll(self.polling_timeout)
+                        did_seek = True
+
+                    return self._consumer.poll(self.polling_timeout), did_seek
+
+                # Parsing + Dispatching
+                async def _parse_record(
+                    record: Message,
+                ) -> AsyncIterable[tuple[tuple[object, Type[object]], Optional[bytes]]]:
+                    yielded = False
+                    for spec in self.parsers_by_topic.get((topic := record.topic()) or "") or ():
+                        try:
+                            # Support async parsers: await if result is awaitable
+                            result: object = spec["parser"](record)
+                            if inspect.isawaitable(result):
+                                result = await result
+                            # Support async correlation extractors: await if result is awaitable
+                            cid_or_awaitable = self.corr_from_record(record, result)
+                            cid: bytes | None = (
+                                await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
+                            )
+                            yield (result, spec["type"]), cid
+                            yielded = True
+                        except Exception as ex:
+                            logger.debug(
+                                f"Parser failed (topic={topic}, out={getattr(spec['type'], '__name__', spec['type'])}): {ex}"
+                            )
+                    # Fallback: yield raw Message if no parser matched or all parsers failed
+                    if not yielded:
+                        cid_or_awaitable = self.corr_from_record(record, record)
+                        cid = await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
+                        yield (record, Message), cid
+
+                try:
+                    while not self._stop_event.is_set():
+                        try:
+                            if self._consumer is None:
+                                break
+                            record, did_seek = await self._consumer_executor.run(_poll_and_maybe_seek)
+                            if did_seek:
+                                # Signal assignment is complete after seek
+                                self._assignment_event.set()
+                            if self._stop_event.is_set():
+                                break
+                            if record is None:
+                                continue
+                            err = record.error()
+                            if err:
+                                if err.code() == KafkaError._PARTITION_EOF:
+                                    continue
+                                logger.error(f"Kafka error: {err}")
+                                continue
+                            # parsed_candidates, cid = await _parse_record(rec)
+                            async for parsed, cid in _parse_record(record):
+                                try:
+                                    await self._on_record(record, parsed, cid)
+                                except Exception:
+                                    logger.exception("_on_record failed")
+
+                            backoff = self.backoff_min
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            if self._stop_event.is_set():
+                                break
+                            logger.exception("Unexpected error in consumer loop; will retry")
+                            await asyncio.sleep(backoff)
+                            backoff = min(backoff * self.backoff_factor, self.backoff_max)
+                except asyncio.CancelledError:
+                    pass
+
+            if self.subscribed_topics:
                 try:
                     consumer = self._consumer
 
                     def subscribe() -> None:
                         consumer.subscribe(
-                            sorted(self._subscription_topics),
+                            sorted(self.subscribed_topics),
                             on_assign=_on_assign,
                             on_revoke=_on_revoke,
                             on_lost=_on_lost,
@@ -309,150 +449,14 @@ class KafkaBaseClient(ABC):
                     logger.exception("Failed to subscribe to topics")
                     raise
 
-            self._consumer_task = asyncio.create_task(self._consume_loop(), name=f"{self.__class__.__name__}_loop")
+            self._consumer_task = asyncio.create_task(_consume_loop(), name=f"{self.__class__.__name__}_loop")
             return self._consumer
-
-    async def _handle_assign(self, partitions: list[TopicPartition]) -> None:
-        """Handle partition assignment notification (seek is done in consume loop)"""
-        await self._notify_rebalance_listener("on_partitions_assigned", partitions)
-        # If seek_to_end_on_assign is False, set event immediately
-        # Otherwise, _consume_loop will set it after seek completes
-        if not self.seek_to_end_on_assign and partitions:
-            self._assignment_event.set()
-
-    async def _consume_loop(self) -> None:
-        backoff = self.backoff_min
-
-        def _poll_and_maybe_seek(timeout: float) -> tuple[Message | None, bool]:
-            """Poll consumer, and seek if pending partitions exist. Returns (message, did_seek)."""
-            if self._consumer is None or self._stop_event.is_set():
-                return None, False
-
-            # Check for pending seek partitions (set during on_assign callback)
-            did_seek = False
-            if self._pending_seek_partitions:
-                partitions_to_seek = self._pending_seek_partitions
-                self._pending_seek_partitions = []
-                for tp in partitions_to_seek:
-                    try:
-                        self._consumer.seek(TopicPartition(tp.topic, tp.partition, OFFSET_END))
-                    except Exception as e:
-                        logger.debug(f"seek_to_end skipped (partition not ready): {e}")
-                # Poll once after seek to apply it before returning
-                self._consumer.poll(0.01)
-                did_seek = True
-
-            return self._consumer.poll(timeout), did_seek
-
-        # Parsing + Dispatching
-        async def _parse_record(record: Message) -> AsyncIterable[tuple[tuple[object, Type[object]], Optional[bytes]]]:
-            yielded = False
-            for spec in self._parsers_by_topic.get((topic := record.topic()) or "") or ():
-                try:
-                    # Support async parsers: await if result is awaitable
-                    result: object = spec["parser"](record)
-                    if inspect.isawaitable(result):
-                        result = await result
-                    # Support async correlation extractors: await if result is awaitable
-                    cid_or_awaitable = self._corr_from_record(record, result)
-                    cid: bytes | None = (
-                        await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
-                    )
-                    yield (result, spec["type"]), cid
-                    yielded = True
-                except Exception as ex:
-                    logger.debug(
-                        f"Parser failed (topic={topic}, out={getattr(spec['type'], '__name__', spec['type'])}): {ex}"
-                    )
-            # Fallback: yield raw Message if no parser matched or all parsers failed
-            if not yielded:
-                cid_or_awaitable = self._corr_from_record(record, record)
-                cid = await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
-                yield (record, Message), cid
-
-        try:
-            while not self._stop_event.is_set():
-                try:
-                    if self._consumer is None:
-                        break
-                    record, did_seek = await self._consumer_executor.run(partial(_poll_and_maybe_seek, timeout=0.5))
-                    if did_seek:
-                        # Signal assignment is complete after seek
-                        self._assignment_event.set()
-                    if self._stop_event.is_set():
-                        break
-                    if record is None:
-                        continue
-                    err = record.error()
-                    if err:
-                        if err.code() == KafkaError._PARTITION_EOF:
-                            continue
-                        logger.error(f"Kafka error: {err}")
-                        continue
-                    # parsed_candidates, cid = await _parse_record(rec)
-                    async for parsed, cid in _parse_record(record):
-                        try:
-                            await self._on_record(record, parsed, cid)
-                        except Exception:
-                            logger.exception("_on_record failed")
-
-                    backoff = self.backoff_min
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    if self._stop_event.is_set():
-                        break
-                    logger.exception("Unexpected error in consumer loop; will retry")
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * self.backoff_factor, self.backoff_max)
-        except asyncio.CancelledError:
-            pass
-
-    async def _notify_rebalance_listener(
-        self,
-        method_name: Literal["on_partitions_assigned", "on_partitions_revoked", "on_partitions_lost"],
-        partitions: list[TopicPartition],
-    ) -> None:
-        listener: PartitionListener | None = self.rebalance_listener
-        if not listener:
-            return
-        try:
-            match method_name:
-                case "on_partitions_assigned":
-                    await listener.on_partitions_assigned(partitions)
-                case "on_partitions_revoked":
-                    await listener.on_partitions_revoked(partitions)
-                case "on_partitions_lost":
-                    await listener.on_partitions_lost(partitions)
-                case _:  # pyright: ignore[reportUnnecessaryComparison]
-                    return
-        except Exception:
-            logger.exception(f"Rebalance listener {method_name} failed")
 
     @staticmethod
     def _tp_sort_key(tp: TopicPartition) -> tuple[str, int]:
         return (tp.topic, tp.partition)
 
-    def _default_corr_from_record(self, rec: Message, parsed: object) -> Optional[bytes]:
-        # Default correlation key extractor: Header priority, case-insensitive
-        try:
-            headers = rec.headers() or []
-            for k, v in headers:
-                if (k or "").lower() in (k.lower() for k in self.corr_header_keys):
-                    try:
-                        return bytes(v)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        try:
-            key = rec.key()
-            if key:
-                return bytes(key)
-        except Exception:
-            pass
-        return None
-
+    @property
     def assigned_table(self) -> list[dict[str, object]]:
         return [
             {
@@ -471,13 +475,9 @@ class KafkaBaseClient(ABC):
     @abstractmethod
     async def _on_stop_cleanup(self) -> None: ...
 
-    @property
-    def bootstrap_servers(self) -> str:
-        if "bootstrap.servers" not in self.producer_config or not self.producer_config["bootstrap.servers"]:
-            raise ValueError("bootstrap.servers is required")
-        return self.producer_config["bootstrap.servers"]
-
-    async def _ensure_topics_exist(self, topics: list[str]) -> None:
+    async def create_topics(
+        self, *topics: str, timeout: float = 10.0, num_partitions: int = 1, replication_factor: int = 1
+    ) -> None:
         """Check if topics exist and create them if they don't."""
         if not self.bootstrap_servers:
             logger.warning("Cannot auto-create topics: bootstrap.servers not available")
@@ -487,7 +487,7 @@ class KafkaBaseClient(ABC):
             admin = AdminClient({"bootstrap.servers": self.bootstrap_servers})
             try:
                 # Get existing topics
-                metadata = admin.list_topics(timeout=10)
+                metadata = admin.list_topics(timeout=timeout)
                 existing_topics = set(metadata.topics.keys())
 
                 # Find missing topics
@@ -499,8 +499,8 @@ class KafkaBaseClient(ABC):
                 new_topics = [
                     NewTopic(
                         topic,
-                        num_partitions=self.topic_num_partitions,
-                        replication_factor=self.topic_replication_factor,
+                        num_partitions=num_partitions,
+                        replication_factor=replication_factor,
                     )
                     for topic in missing_topics
                 ]
@@ -510,7 +510,7 @@ class KafkaBaseClient(ABC):
                 created: list[str] = []
                 for topic, future in futures.items():
                     try:
-                        future.result(timeout=10)
+                        future.result(timeout=timeout)
                         created.append(topic)
                     except Exception as e:
                         logger.warning(f"Failed to create topic {topic}: {e}")
@@ -524,6 +524,83 @@ class KafkaBaseClient(ABC):
                 logger.info(f"Auto-created topics: {created}")
         except Exception:
             logger.exception("Failed to auto-create topics")
+
+    async def delete_all_topics(self, *, timeout: float = 10.0, exclude_system_topics: bool = True) -> list[str]:
+        """Delete all topics in the Kafka cluster.
+
+        Args:
+            timeout: Timeout in seconds for deletion operations. Defaults to 10.0.
+            exclude_system_topics: If True (default), excludes system topics like
+                `__consumer_offsets`, `__transaction_state`, `_confluent-*`, etc.
+                Set to False to delete all topics including system ones.
+
+        Returns:
+            List of successfully deleted topic names.
+
+        Raises:
+            ValueError: If bootstrap.servers is not configured.
+        """
+        if not self.bootstrap_servers:
+            raise ValueError("Cannot delete topics: bootstrap.servers not available")
+
+        def _is_system_topic(topic: str) -> bool:
+            """Check if a topic is a system topic that should be protected."""
+            # Kafka internal topics (double underscore prefix)
+            if topic.startswith("__"):
+                return True
+            # Confluent Control Center topics (single underscore + confluent prefix)
+            if topic.startswith("_confluent-"):
+                return True
+            # Other common system topic patterns
+            if topic.startswith("_") and any(
+                pattern in topic.lower() for pattern in ["schema", "connect", "ksql", "control"]
+            ):
+                return True
+            return False
+
+        def _delete_all_topics() -> list[str]:
+            admin = AdminClient({"bootstrap.servers": self.bootstrap_servers})
+            try:
+                # Get all existing topics
+                metadata = admin.list_topics(timeout=int(timeout))
+                all_topics = list(metadata.topics.keys())
+
+                # Filter out system topics if requested
+                if exclude_system_topics:
+                    topics_to_delete = [t for t in all_topics if not _is_system_topic(t)]
+                    excluded = [t for t in all_topics if _is_system_topic(t)]
+                    if excluded:
+                        logger.info(f"Excluding system topics from deletion: {excluded}")
+                else:
+                    topics_to_delete = all_topics
+
+                if not topics_to_delete:
+                    logger.info("No topics to delete")
+                    return []
+
+                # Delete all topics
+                futures = admin.delete_topics(topics_to_delete, operation_timeout=int(timeout))
+
+                # Wait for deletion to complete
+                deleted: list[str] = []
+                for topic, future in futures.items():
+                    try:
+                        future.result(timeout=timeout)
+                        deleted.append(topic)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete topic {topic}: {e}")
+                return deleted
+            finally:
+                pass  # AdminClient doesn't have a close method
+
+        try:
+            deleted = await asyncio.to_thread(_delete_all_topics)
+            if deleted:
+                logger.info(f"Deleted topics: {deleted}")
+            return deleted
+        except Exception:
+            logger.exception("Failed to delete topics")
+            raise
 
     async def produce(
         self,
@@ -593,20 +670,25 @@ class KafkaBaseClient(ABC):
 
         return await self._consumer_executor.run(_poll)
 
+    @property
+    def subscribed_topics(self) -> set[str]:
+        subscribed_topics: set[str] = set()
+        for ps in self.parsers:
+            # Build topic index and subscription topics (ignore explicit partitioning)
+            for topic in ps["topics"]:
+                subscribed_topics.add(topic)
+        return subscribed_topics
 
-def create_consumer(config: ConsumerConfig, *, logger: logging.Logger | None = None) -> Consumer:
-    config = config.copy()
-    if "group.id" not in config or not config["group.id"]:
-        config["group.id"] = f"consumer-{uuid.uuid4().hex[:8]}"
-    if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
-        raise ValueError("bootstrap.servers is required")
-    return Consumer(dict(config), logger=logger or get_logger(__name__))
+    @property
+    def parsers_by_topic(self) -> dict[str, list[ParserSpec[object]]]:
+        parsers_by_topic: dict[str, list[ParserSpec[object]]] = {}
+        for ps in self.parsers:
+            for topic in ps["topics"]:
+                parsers_by_topic.setdefault(topic, []).append(ps)
+        return parsers_by_topic
 
-
-def create_producer(config: ProducerConfig, *, logger: logging.Logger | None = None) -> Producer:
-    config = config.copy()
-    if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
-        raise ValueError("bootstrap.servers is required")
-    if "client.id" not in config or not config["client.id"]:
-        config["client.id"] = f"producer-{uuid.uuid4().hex[:8]}"
-    return Producer(dict(config), logger=logger or get_logger(__name__))
+    @property
+    def bootstrap_servers(self) -> str:
+        if "bootstrap.servers" not in self.producer_config or not self.producer_config["bootstrap.servers"]:
+            raise ValueError("bootstrap.servers is required")
+        return self.producer_config["bootstrap.servers"]

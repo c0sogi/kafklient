@@ -3,11 +3,13 @@
 import asyncio
 import queue
 import threading
+from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
 
 
+@dataclass
 class DedicatedThreadExecutor:
     """
     Executes all tasks on a single dedicated thread.
@@ -16,30 +18,29 @@ class DedicatedThreadExecutor:
     where Consumer/Producer must be accessed from the same thread.
     """
 
-    def __init__(self, name: str = "kafka-worker") -> None:
-        self._name = name
-        self._queue: queue.Queue[tuple[Callable[[], Any], asyncio.Future[Any]] | None] = queue.Queue()
-        self._thread: threading.Thread | None = None
-        self._started = False
-        self._loop: asyncio.AbstractEventLoop | None = None
+    name: str = "kafka-worker"
 
-    def start(self, loop: asyncio.AbstractEventLoop) -> None:
+    _queue: queue.Queue[tuple[Callable[[], Any], asyncio.Future[Any]] | None] = field(
+        default_factory=queue.Queue, init=False, repr=False
+    )
+    _thread: threading.Thread | None = field(default=None, init=False, repr=False)
+    _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
+
+    def start(self, loop: asyncio.AbstractEventLoop, *, name: str | None = None) -> None:
         """Start the dedicated worker thread."""
-        if self._started:
+        if self.is_running:
             return
         self._loop = loop
-        self._thread = threading.Thread(target=self._worker_loop, name=self._name, daemon=True)
+        self._thread = threading.Thread(target=self._worker_loop, name=name, daemon=True)
         self._thread.start()
-        self._started = True
 
     def stop(self) -> None:
         """Stop the dedicated worker thread."""
-        if not self._started:
+        if not self.is_running:
             return
         self._queue.put(None)  # Signal to stop
         if self._thread:
             self._thread.join(timeout=5.0)
-        self._started = False
         self._thread = None
 
     def _worker_loop(self) -> None:
@@ -60,7 +61,7 @@ class DedicatedThreadExecutor:
 
     async def run(self, func: Callable[[], T]) -> T:
         """Run a function on the dedicated thread and await the result."""
-        if not self._started or not self._loop:
+        if not self.is_running or not self._loop:
             raise RuntimeError("Executor not started")
 
         future: asyncio.Future[T] = self._loop.create_future()
@@ -69,4 +70,4 @@ class DedicatedThreadExecutor:
 
     @property
     def is_running(self) -> bool:
-        return self._started
+        return self._thread is not None and self._thread.is_alive()

@@ -26,7 +26,7 @@ T = TypeVar("T")
 T_Co = TypeVar("T_Co", covariant=True)
 
 # Parser callback can be sync or async
-ParserCallback = Callable[[Message], Union[T_Co, Awaitable[T_Co]]]
+ParserCallback = Callable[[Message], Union[T, Awaitable[T]]]
 
 # Correlation extractor callback can be sync or async
 CorrelationCallback = Callable[[Message, object], Union[bytes | None, Awaitable[bytes | None]]]

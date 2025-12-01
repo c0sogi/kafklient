@@ -1,9 +1,9 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Optional, Type, cast
+from typing import Optional, Type
 
 from .._logging import get_logger
-from ..types import T_Co
+from ..types import T
 from ..types.backend import Message
 from ..utils.task import TypeStream
 from .base_client import KafkaBaseClient
@@ -21,12 +21,12 @@ class KafkaListener(KafkaBaseClient):
 
     async def subscribe(
         self,
-        tp: Type[T_Co],
+        tp: Type[T],
         *,
         queue_maxsize: int = 0,
         fresh: bool = False,
-    ) -> TypeStream[T_Co]:
-        if self._closed:
+    ) -> TypeStream[T]:
+        if self.closed:
             await self.start()
         await self.consumer
         if fresh or tp not in self.subscriptions:
@@ -36,7 +36,7 @@ class KafkaListener(KafkaBaseClient):
                 asyncio.Event(),
             )
         q, event = self.subscriptions[tp]
-        return TypeStream[T_Co](cast(asyncio.Queue[T_Co], q), event)
+        return TypeStream[T](q, event)  # pyright: ignore[reportArgumentType]
 
     async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None:
         obj, ot = parsed

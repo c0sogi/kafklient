@@ -6,7 +6,6 @@ from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._schema import FlagRecord
 from kafklient.tests._utils import (
     as_bool,
-    ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
     make_consumer_config,
@@ -18,9 +17,6 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
     async def test_listener_stop_while_waiting(self) -> None:
         """Test that stopping listener properly signals the stream to stop."""
         topic, group_id = get_topic_and_group_id(self.test_listener_stop_while_waiting)
-
-        # Create topic first
-        await ensure_topic_exists(topic)
 
         def parse_flag(rec: Message) -> FlagRecord:
             data = loads_json(rec.value())
@@ -35,6 +31,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
                 }
             ],
             consumer_config=make_consumer_config(group_id),
+            auto_create_topics=True,
         )
 
         await listener.start()
@@ -64,9 +61,6 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
         """Test handling of messages with empty values."""
         topic, group_id = get_topic_and_group_id(self.test_empty_value_handling)
 
-        # Create topic first
-        await ensure_topic_exists(topic)
-
         def parse_raw(rec: Message) -> bytes:
             return rec.value() or b""
 
@@ -80,6 +74,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             ],
             seek_to_end_on_assign=False,
             consumer_config=make_consumer_config(group_id),
+            auto_create_topics=True,
         )
 
         try:

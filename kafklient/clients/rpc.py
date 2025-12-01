@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Literal, Optional, Type, Union, override
 
 from .._logging import get_logger
-from ..types import KafkaError, Producer, T_Co
+from ..types import KafkaError, Producer, T
 from ..types.backend import KafkaException, Message, TopicPartition
 from ..utils.task import Waiter
 from .base_client import KafkaBaseClient, PartitionListener
@@ -14,7 +14,7 @@ from .base_client import KafkaBaseClient, PartitionListener
 logger: logging.Logger = get_logger(__name__)
 
 # Handler type: sync or async function that takes parsed request and returns response bytes
-RequestHandler = Callable[[object, Message], Union[bytes, Awaitable[bytes]]]
+RequestHandler = Callable[[T, Message], Union[bytes, Awaitable[bytes]]]
 
 
 class _RPCRebalanceListener(PartitionListener):
@@ -50,6 +50,12 @@ class KafkaRPC(KafkaBaseClient):
     rebalance_listener: Optional[PartitionListener] = field(default_factory=_RPCRebalanceListener)
     waiters: dict[bytes, Waiter[object]] = field(default_factory=dict[bytes, Waiter[object]], init=False, repr=False)
 
+    @override
+    async def ready(self, *, timeout: float | None = None) -> None:
+        """Public method to ensure consumer is ready for RPC requests."""
+        await super().ready(timeout=timeout)
+        await self.producer
+
     async def request(
         self,
         req_topic: str,
@@ -59,11 +65,11 @@ class KafkaRPC(KafkaBaseClient):
         req_key: Optional[bytes] = None,
         req_headers: Optional[list[tuple[str, str | bytes]]] = None,
         res_timeout: float = 30.0,
-        res_expect_type: Optional[Type[T_Co]] = None,
+        res_expect_type: Optional[Type[T]] = None,
         correlation_id: Optional[bytes] = None,
         propagate_corr_to: Literal["key", "header", "both"] = "key",
         correlation_header_key: str = "x-corr-id",
-    ) -> T_Co:
+    ) -> T:
         if not req_topic or not req_topic.strip():
             raise ValueError("req_topic must be non-empty")
 
@@ -90,13 +96,13 @@ class KafkaRPC(KafkaBaseClient):
                 msg_headers.append((correlation_header_key, corr_id))
 
         # Start client if needed
-        if self._closed:
+        if self.closed:
             await self.start()
         producer = await self.producer
 
         # Register waiter BEFORE sending to avoid race
-        fut: asyncio.Future[T_Co] = asyncio.get_running_loop().create_future()
-        self.waiters[corr_id] = Waiter[T_Co](future=fut, expect_type=res_expect_type)
+        fut: asyncio.Future[T] = asyncio.get_running_loop().create_future()
+        self.waiters[corr_id] = Waiter[T](future=fut, expect_type=res_expect_type)
 
         try:
             await self._produce_request(
@@ -120,12 +126,6 @@ class KafkaRPC(KafkaBaseClient):
         except Exception:
             self.waiters.pop(corr_id, None)
             raise
-
-    @override
-    async def ready(self, *, timeout: float | None = None) -> None:
-        """Public method to ensure consumer is ready for RPC requests."""
-        await super().ready(timeout=timeout)
-        await self.producer
 
     async def _produce_request(
         self,
@@ -229,17 +229,11 @@ class KafkaRPCServer(KafkaBaseClient):
     propagate_corr_to: Literal["key", "header", "both"] = "key"
 
     # Registered handlers: type -> handler function
-    _handlers: dict[Type[object], RequestHandler] = field(
-        default_factory=dict[Type[object], RequestHandler], init=False, repr=False
+    _handlers: dict[Type[object], RequestHandler[object]] = field(
+        default_factory=dict[Type[object], RequestHandler[object]], init=False, repr=False
     )
 
-    def handler(
-        self,
-        request_type: Type[T_Co],
-    ) -> Callable[
-        [Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]]],
-        Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]],
-    ]:
+    def handler(self, request_type: Type[T]) -> Callable[[RequestHandler[T]], RequestHandler[T]]:
         """
         Decorator to register a handler for a specific request type.
 
@@ -250,8 +244,8 @@ class KafkaRPCServer(KafkaBaseClient):
         """
 
         def decorator(
-            func: Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]],
-        ) -> Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]]:
+            func: RequestHandler[T],
+        ) -> RequestHandler[T]:
             self._handlers[request_type] = func  # pyright: ignore[reportArgumentType]
             return func
 
@@ -259,8 +253,8 @@ class KafkaRPCServer(KafkaBaseClient):
 
     def register_handler(
         self,
-        request_type: Type[T_Co],
-        handler: Callable[[T_Co, Message], Union[bytes, Awaitable[bytes]]],
+        request_type: Type[T],
+        handler: Callable[[T, Message], Union[bytes, Awaitable[bytes]]],
     ) -> None:
         """
         Register a handler for a specific request type programmatically.

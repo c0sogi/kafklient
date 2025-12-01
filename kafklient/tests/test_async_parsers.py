@@ -16,12 +16,11 @@ import asyncio
 import unittest
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Awaitable, Callable, Optional, Type
+from typing import Optional, Type
 
 from kafklient import KafkaBaseClient, Message
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._utils import (
-    ensure_topic_exists,
     get_topic_and_group_id,
     make_consumer_config,
     make_producer_config,
@@ -105,12 +104,11 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
     async def test_sync_parser(self) -> None:
         """Baseline: sync parser should work normally."""
         topic, group_id = get_topic_and_group_id(self.test_sync_parser)
-        await ensure_topic_exists(topic)
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            auto_create_topics=True,
         )
 
         try:
@@ -130,12 +128,11 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
     async def test_async_def_parser(self) -> None:
         """Test async def parser is awaited correctly."""
         topic, group_id = get_topic_and_group_id(self.test_async_def_parser)
-        await ensure_topic_exists(topic)
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": async_parser}],
+            auto_create_topics=True,
         )
 
         try:
@@ -154,15 +151,11 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
     async def test_lambda_wrapping_async_parser(self) -> None:
         """Test lambda wrapping async parser is awaited correctly."""
         topic, group_id = get_topic_and_group_id(self.test_lambda_wrapping_async_parser)
-        await ensure_topic_exists(topic)
-
-        # Lambda that calls async function - returns coroutine
-        lambda_parser: Callable[[Message], Awaitable[ParsedMessage]] = lambda r: async_parser(r)  # noqa: E731
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": lambda_parser}],  # type: ignore[list-item]
+            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": lambda r: async_parser(r)}],
+            auto_create_topics=True,
         )
 
         try:
@@ -181,15 +174,13 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
     async def test_partial_wrapping_async_parser(self) -> None:
         """Test functools.partial wrapping async parser is awaited correctly."""
         topic, group_id = get_topic_and_group_id(self.test_partial_wrapping_async_parser)
-        await ensure_topic_exists(topic)
-
-        # Partial that wraps async function with extra arg
-        partial_parser = partial(async_parser_with_arg, extra="partial")
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": partial_parser}],
+            parsers=[
+                {"topics": [topic], "type": ParsedMessage, "parser": partial(async_parser_with_arg, extra="partial")}
+            ],
+            auto_create_topics=True,
         )
 
         try:
@@ -212,13 +203,12 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
     async def test_sync_correlation_extractor(self) -> None:
         """Baseline: sync correlation extractor should work normally."""
         topic, group_id = get_topic_and_group_id(self.test_sync_correlation_extractor)
-        await ensure_topic_exists(topic)
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
             corr_from_record=sync_corr,
+            auto_create_topics=True,
         )
 
         try:
@@ -235,13 +225,12 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
     async def test_async_def_correlation_extractor(self) -> None:
         """Test async def correlation extractor is awaited correctly."""
         topic, group_id = get_topic_and_group_id(self.test_async_def_correlation_extractor)
-        await ensure_topic_exists(topic)
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
             corr_from_record=async_corr,
+            auto_create_topics=True,
         )
 
         try:
@@ -258,16 +247,12 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
     async def test_lambda_wrapping_async_correlation_extractor(self) -> None:
         """Test lambda wrapping async correlation extractor is awaited correctly."""
         topic, group_id = get_topic_and_group_id(self.test_lambda_wrapping_async_correlation_extractor)
-        await ensure_topic_exists(topic)
-
-        # Lambda that calls async function - returns coroutine
-        lambda_corr: Callable[[Message, object], Awaitable[bytes | None]] = lambda r, p: async_corr(r, p)  # noqa: E731
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
-            corr_from_record=lambda_corr,  # type: ignore[arg-type]
+            corr_from_record=lambda r, p: async_corr(r, p),
+            auto_create_topics=True,
         )
 
         try:
@@ -284,16 +269,12 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
     async def test_partial_wrapping_async_correlation_extractor(self) -> None:
         """Test functools.partial wrapping async correlation extractor is awaited correctly."""
         topic, group_id = get_topic_and_group_id(self.test_partial_wrapping_async_correlation_extractor)
-        await ensure_topic_exists(topic)
-
-        # Partial that wraps async function with extra arg
-        partial_corr = partial(async_corr_with_arg, prefix="partial")
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
-            corr_from_record=partial_corr,
+            corr_from_record=partial(async_corr_with_arg, prefix="partial"),
+            auto_create_topics=True,
         )
 
         try:
@@ -314,13 +295,12 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
     async def test_async_parser_with_async_corr(self) -> None:
         """Test async parser combined with async correlation extractor."""
         topic, group_id = get_topic_and_group_id(self.test_async_parser_with_async_corr)
-        await ensure_topic_exists(topic)
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": async_parser}],
             corr_from_record=async_corr,
+            auto_create_topics=True,
         )
 
         try:
@@ -340,16 +320,12 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
     async def test_lambda_parser_with_partial_corr(self) -> None:
         """Test lambda async parser combined with partial async correlation extractor."""
         topic, group_id = get_topic_and_group_id(self.test_lambda_parser_with_partial_corr)
-        await ensure_topic_exists(topic)
-
-        lambda_parser: Callable[[Message], Awaitable[ParsedMessage]] = lambda r: async_parser(r)  # noqa: E731
-        partial_corr = partial(async_corr_with_arg, prefix="combo")
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": lambda_parser}],  # type: ignore[list-item]
-            corr_from_record=partial_corr,
+            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": lambda r: async_parser(r)}],
+            corr_from_record=partial(async_corr_with_arg, prefix="combo"),
+            auto_create_topics=True,
         )
 
         try:
@@ -369,16 +345,14 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
     async def test_partial_parser_with_lambda_corr(self) -> None:
         """Test partial async parser combined with lambda async correlation extractor."""
         topic, group_id = get_topic_and_group_id(self.test_partial_parser_with_lambda_corr)
-        await ensure_topic_exists(topic)
-
-        partial_parser = partial(async_parser_with_arg, extra="mixed")
-        lambda_corr: Callable[[Message, object], Awaitable[bytes | None]] = lambda r, p: async_corr(r, p)  # noqa: E731
-
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": partial_parser}],
-            corr_from_record=lambda_corr,  # type: ignore[arg-type]
+            parsers=[
+                {"topics": [topic], "type": ParsedMessage, "parser": partial(async_parser_with_arg, extra="mixed")}
+            ],
+            corr_from_record=lambda r, p: async_corr(r, p),
+            auto_create_topics=True,
         )
 
         try:
@@ -402,7 +376,6 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
     async def test_parser_returning_none(self) -> None:
         """Test parser that may return None-ish values."""
         topic, group_id = get_topic_and_group_id(self.test_parser_returning_none)
-        await ensure_topic_exists(topic)
 
         async def nullable_parser(record: Message) -> str | None:
             await asyncio.sleep(0.001)
@@ -415,6 +388,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": str, "parser": nullable_parser}],
+            auto_create_topics=True,
         )
 
         try:
@@ -431,7 +405,6 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
     async def test_corr_returning_none(self) -> None:
         """Test correlation extractor that returns None."""
         topic, group_id = get_topic_and_group_id(self.test_corr_returning_none)
-        await ensure_topic_exists(topic)
 
         async def nullable_corr(record: Message, parsed: object) -> bytes | None:
             await asyncio.sleep(0.001)
@@ -442,6 +415,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
             corr_from_record=nullable_corr,
+            auto_create_topics=True,
         )
 
         try:
@@ -458,7 +432,6 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
     async def test_multiple_parsers_mixed_sync_async(self) -> None:
         """Test multiple parsers with mixed sync and async parsers on same topic."""
         topic, group_id = get_topic_and_group_id(self.test_multiple_parsers_mixed_sync_async)
-        await ensure_topic_exists(topic)
 
         # Two parsers on same topic: one sync, one async
         client = AsyncParserTestClient(
@@ -468,6 +441,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
                 {"topics": [topic], "type": ParsedMessage, "parser": sync_parser},
                 {"topics": [topic], "type": ParsedMessage, "parser": async_parser},
             ],
+            auto_create_topics=True,
         )
 
         try:

@@ -20,7 +20,6 @@ from typing import Optional, Type
 from kafklient import KafkaBaseClient, Message, logger
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._utils import (
-    ensure_topic_exists,
     get_topic_and_group_id,
     make_consumer_config,
     make_producer_config,
@@ -33,11 +32,6 @@ class SimpleTestClient(KafkaBaseClient):
 
     received_records: list[Message] = field(default_factory=list[Message], init=False, repr=False)
     record_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
-
-    @property
-    def is_closed(self) -> bool:
-        """Expose closed state for testing."""
-        return self._closed
 
     @property
     def has_producer(self) -> bool:
@@ -63,12 +57,11 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
     async def test_produce_single_message(self) -> None:
         """Test producing a single message."""
         topic, group_id = get_topic_and_group_id(self.test_produce_single_message)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
@@ -96,12 +89,11 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
     async def test_produce_with_key(self) -> None:
         """Test producing a message with a key."""
         topic, group_id = get_topic_and_group_id(self.test_produce_with_key)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
@@ -123,12 +115,11 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
     async def test_produce_with_headers(self) -> None:
         """Test producing a message with headers."""
         topic, group_id = get_topic_and_group_id(self.test_produce_with_headers)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
@@ -154,12 +145,11 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
     async def test_produce_multiple_messages(self) -> None:
         """Test producing multiple messages."""
         topic, group_id = get_topic_and_group_id(self.test_produce_multiple_messages)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
@@ -199,13 +189,12 @@ class TestBaseClientPoll(unittest.IsolatedAsyncioTestCase):
     async def test_poll_returns_message(self) -> None:
         """Test that poll() returns messages."""
         topic, group_id = get_topic_and_group_id(self.test_poll_returns_message)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
             seek_to_end_on_assign=False,  # Get messages from beginning
+            auto_create_topics=True,
         )
 
         try:
@@ -229,17 +218,14 @@ class TestBaseClientPoll(unittest.IsolatedAsyncioTestCase):
 
     async def test_poll_timeout_returns_none(self) -> None:
         """Test that poll() returns None on timeout when no messages."""
-        topic, group_id = get_topic_and_group_id(self.test_poll_timeout_returns_none)
-        await ensure_topic_exists(topic)
-
         # Use a unique topic with no messages
-        empty_topic = f"empty-{uuid.uuid4().hex[:8]}"
-        await ensure_topic_exists(empty_topic)
-
+        empty_topic, group_id = get_topic_and_group_id(self.test_poll_timeout_returns_none)
+        empty_topic += f"-{uuid.uuid4().hex[:8]}"
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [empty_topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
@@ -262,69 +248,65 @@ class TestBaseClientLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_start_stop(self) -> None:
         """Test basic start/stop lifecycle."""
         topic, group_id = get_topic_and_group_id(self.test_start_stop)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         # Initially closed
-        assert client.is_closed is True
+        assert client.closed is True
 
         await client.start()
-        assert client.is_closed is False
+        assert client.closed is False
         assert client.has_producer or client.has_consumer
 
         await client.stop()
-        assert client.is_closed is True
+        assert client.closed is True
 
     async def test_double_start_is_idempotent(self) -> None:
         """Test that calling start() twice is safe."""
         topic, group_id = get_topic_and_group_id(self.test_double_start_is_idempotent)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
             await client.start()
             await client.start()  # Should not raise
-            assert client.is_closed is False
+            assert client.closed is False
         finally:
             await client.stop()
 
     async def test_double_stop_is_idempotent(self) -> None:
         """Test that calling stop() twice is safe."""
         topic, group_id = get_topic_and_group_id(self.test_double_stop_is_idempotent)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         await client.start()
         await client.stop()
         await client.stop()  # Should not raise
-        assert client.is_closed is True
+        assert client.closed is True
 
     async def test_context_manager(self) -> None:
         """Test async context manager usage."""
         topic, group_id = get_topic_and_group_id(self.test_context_manager)
-        await ensure_topic_exists(topic)
-
         async with SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         ) as client:
-            assert client.is_closed is False
+            assert client.closed is False
 
             # Should be able to produce
             await client.produce(topic, value=b"context-manager-test", flush=True)
@@ -332,7 +314,7 @@ class TestBaseClientLifecycle(unittest.IsolatedAsyncioTestCase):
             assert len(client.received_records) >= 1
 
         # After exiting context, should be closed
-        assert client.is_closed is True
+        assert client.closed is True
 
 
 class TestBaseClientAutoCreateTopics(unittest.IsolatedAsyncioTestCase):
@@ -371,12 +353,11 @@ class TestBaseClientFlush(unittest.IsolatedAsyncioTestCase):
     async def test_flush(self) -> None:
         """Test that flush() waits for all messages to be delivered."""
         topic, group_id = get_topic_and_group_id(self.test_flush)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            auto_create_topics=True,
         )
 
         try:
@@ -407,13 +388,12 @@ class TestBaseClientAssignment(unittest.IsolatedAsyncioTestCase):
     async def test_ready_waits_for_assignment(self) -> None:
         """Test that ready() waits for partition assignment."""
         topic, group_id = get_topic_and_group_id(self.test_ready_waits_for_assignment)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
             assignment_timeout_s=30.0,
+            auto_create_topics=True,
         )
 
         try:
@@ -421,28 +401,27 @@ class TestBaseClientAssignment(unittest.IsolatedAsyncioTestCase):
             await client.start()
 
             # After start, assignment should be complete
-            table = client.assigned_table()
+            table = client.assigned_table
             assert len(table) > 0, "No partitions assigned"
             assert table[0]["topic"] == topic
         finally:
             await client.stop()
 
     async def test_assigned_table(self) -> None:
-        """Test assigned_table() returns correct partition info."""
+        """Test assigned_table returns correct partition info."""
         topic, group_id = get_topic_and_group_id(self.test_assigned_table)
-        await ensure_topic_exists(topic)
-
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
             seek_to_end_on_assign=True,
+            auto_create_topics=True,
         )
 
         try:
             await client.start()
 
-            table = client.assigned_table()
+            table = client.assigned_table
             assert len(table) > 0
 
             entry = table[0]

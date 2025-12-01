@@ -11,17 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, Coroutine, Sequence
 
-from kafklient import (
-    AdminClient,
-    Consumer,
-    ConsumerConfig,
-    KafkaRPCServer,
-    Message,
-    NewTopic,
-    Producer,
-    ProducerConfig,
-    create_consumer,
-)
+from kafklient import ConsumerConfig, KafkaRPCServer, Message, Producer, ProducerConfig
 
 from ._config import KAFKA_BOOTSTRAP, TEST_TIMEOUT
 
@@ -83,25 +73,7 @@ def make_consumer_config(group_id: str) -> ConsumerConfig:
 
 
 def make_producer_config() -> ProducerConfig:
-    return {
-        "bootstrap.servers": KAFKA_BOOTSTRAP,
-    }
-
-
-async def ensure_topic_exists(topic: str) -> None:
-    """Ensure a topic exists before using it."""
-    admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP})
-
-    def _create() -> None:
-        futures = admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
-        for _, future in futures.items():
-            try:
-                future.result(timeout=10.0)
-            except Exception:
-                # Topic might already exist, that's fine
-                pass
-
-    await asyncio.to_thread(_create)
+    return {"bootstrap.servers": KAFKA_BOOTSTRAP}
 
 
 async def produce_messages(
@@ -118,25 +90,6 @@ async def produce_messages(
         producer.flush(timeout=10.0)
 
     await asyncio.to_thread(_produce)
-
-
-def make_ready_consumer(group_id: str, topics: list[str]) -> Consumer:
-    """Create a consumer that's ready to receive messages (already subscribed and stabilized)."""
-    consumer = create_consumer({
-        "bootstrap.servers": KAFKA_BOOTSTRAP,
-        "group.id": group_id,
-        "auto.offset.reset": "latest",
-        "enable.auto.commit": False,
-        "session.timeout.ms": 6000,
-        "heartbeat.interval.ms": 1000,
-    })
-    consumer.subscribe(topics)
-    # Poll until assigned and stabilized (Windows needs ~3s)
-    for _ in range(50):
-        consumer.poll(0.1)
-        if consumer.assignment():
-            break
-    return consumer
 
 
 # Request types for RPC servers
@@ -175,11 +128,11 @@ def create_echo_rpc_server(
     """Create an echo RPC server using KafkaRPCServer."""
 
     async def echo_server() -> None:
-
         server = KafkaRPCServer(
             consumer_config=make_consumer_config(server_group),
             producer_config=make_producer_config(),
             parsers=[{"topics": [request_topic], "type": EchoRequest, "parser": parse_echo_request}],
+            auto_create_topics=True,
         )
 
         @server.handler(EchoRequest)
@@ -200,11 +153,11 @@ def create_json_echo_server(
     """Create a JSON echo RPC server using KafkaRPCServer."""
 
     async def json_server() -> None:
-
         server = KafkaRPCServer(
             consumer_config=make_consumer_config(server_group),
             producer_config=make_producer_config(),
             parsers=[{"topics": [request_topic], "type": JsonEchoRequest, "parser": parse_json_echo_request}],
+            auto_create_topics=True,
         )
 
         @server.handler(JsonEchoRequest)

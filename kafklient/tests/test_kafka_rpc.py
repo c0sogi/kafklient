@@ -12,7 +12,6 @@ from kafklient.tests._utils import (
     as_str,
     create_echo_rpc_server,
     create_json_echo_server,
-    ensure_topic_exists,
     get_topic_and_group_id,
     loads_json,
     make_consumer_config,
@@ -26,9 +25,6 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         request_topic, client_group = get_topic_and_group_id(self.test_rpc_request_response, suffix="request")
         reply_topic, server_group = get_topic_and_group_id(self.test_rpc_request_response, suffix="reply")
 
-        await ensure_topic_exists(request_topic)
-        await ensure_topic_exists(reply_topic)
-
         def parse_reply(rec: Message) -> bytes:
             return rec.value() or b""
 
@@ -36,6 +32,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
             parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(client_group),
+            auto_create_topics=True,
         )
 
         server_ready = asyncio.Event()
@@ -94,9 +91,6 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         request_topic, client_group = get_topic_and_group_id(self.test_rpc_with_json_response, suffix="request")
         reply_topic, server_group = get_topic_and_group_id(self.test_rpc_with_json_response, suffix="reply")
 
-        await ensure_topic_exists(request_topic)
-        await ensure_topic_exists(reply_topic)
-
         def parse_json_reply(rec: Message) -> RPCResponsePayload:
             data = loads_json(rec.value())
             echo_value = data.get("echo")
@@ -123,6 +117,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
             ],
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(client_group),
+            auto_create_topics=True,
         )
 
         server_ready = asyncio.Event()
@@ -184,9 +179,6 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
         request_topic, client_group = get_topic_and_group_id(self.test_rpc_timeout, suffix="request")
         reply_topic, _ = get_topic_and_group_id(self.test_rpc_timeout, suffix="reply")
 
-        await ensure_topic_exists(request_topic)
-        await ensure_topic_exists(reply_topic)
-
         def parse_reply(rec: Message) -> bytes:
             return rec.value() or b""
 
@@ -194,6 +186,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
             parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(client_group),
+            auto_create_topics=True,
         )
 
         try:

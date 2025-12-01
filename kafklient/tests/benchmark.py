@@ -13,12 +13,11 @@ import statistics
 import time
 from dataclasses import dataclass
 
-from kafklient import KafkaListener, KafkaRPC, Message, ParserSpec, create_producer
+from kafklient import KafkaListener, KafkaRPC, Message, create_producer
 
 from ._config import KAFKA_BOOTSTRAP
 from ._utils import (
     create_echo_rpc_server,
-    ensure_topic_exists,
     make_consumer_config,
     make_producer_config,
 )
@@ -85,17 +84,14 @@ async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
     topic = f"bench_listener_{int(time.time())}"
     group_id = f"bench_listener_group_{int(time.time())}"
 
-    await ensure_topic_exists(topic)
-
     def parse_record(rec: Message) -> SimpleRecord:
         data = json.loads(rec.value() or b"{}")
         return SimpleRecord(value=str(data.get("value", "")))
 
-    specs: list[ParserSpec[SimpleRecord]] = [{"topics": [topic], "type": SimpleRecord, "parser": parse_record}]
-
     listener = KafkaListener(
-        parsers=specs,
+        parsers=[{"topics": [topic], "type": SimpleRecord, "parser": parse_record}],
         consumer_config=make_consumer_config(group_id),
+        auto_create_topics=True,
     )
 
     # Reuse single producer for fair comparison
@@ -150,22 +146,18 @@ async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
 async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
     """Benchmark KafkaRPC request/response latency."""
     request_topic = f"bench_rpc_req_{int(time.time())}"
-    reply_topic = f"bench_rpc_rep_{int(time.time())}"
+    reply_topic = f"bench_rpc_res_{int(time.time())}"
     client_group = f"bench_rpc_client_{int(time.time())}"
     server_group = f"bench_rpc_server_{int(time.time())}"
-
-    await ensure_topic_exists(request_topic)
-    await ensure_topic_exists(reply_topic)
 
     def parse_reply(rec: Message) -> bytes:
         return rec.value() or b""
 
-    specs: list[ParserSpec[bytes]] = [{"topics": [reply_topic], "type": bytes, "parser": parse_reply}]
-
     rpc = KafkaRPC(
-        parsers=specs,
+        parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
         producer_config=make_producer_config(),
         consumer_config=make_consumer_config(client_group),
+        auto_create_topics=True,
     )
 
     server_stop = asyncio.Event()
