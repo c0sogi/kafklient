@@ -81,8 +81,8 @@ class SimpleRecord:
 
 async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
     """Benchmark KafkaListener message receive latency."""
-    topic = f"bench_listener_{int(time.time())}"
-    group_id = f"bench_listener_group_{int(time.time())}"
+    topic = benchmark_listener.__name__ + "-topic"
+    group_id = benchmark_listener.__name__ + "-group"
 
     def parse_record(rec: Message) -> SimpleRecord:
         data = json.loads(rec.value() or b"{}")
@@ -145,10 +145,10 @@ async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
 
 async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
     """Benchmark KafkaRPC request/response latency."""
-    request_topic = f"bench_rpc_req_{int(time.time())}"
-    reply_topic = f"bench_rpc_res_{int(time.time())}"
-    client_group = f"bench_rpc_client_{int(time.time())}"
-    server_group = f"bench_rpc_server_{int(time.time())}"
+    request_topic = benchmark_rpc.__name__ + "-req"
+    reply_topic = benchmark_rpc.__name__ + "-res"
+    client_group = benchmark_rpc.__name__ + "-client"
+    server_group = benchmark_rpc.__name__ + "-server"
 
     def parse_reply(rec: Message) -> bytes:
         return rec.value() or b""

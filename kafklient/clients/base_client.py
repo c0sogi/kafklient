@@ -15,6 +15,7 @@ from typing import (
     Protocol,
     Self,
     Type,
+    TypedDict,
     final,
 )
 
@@ -36,6 +37,16 @@ from ..types import (
 from ..utils.executor import DedicatedThreadExecutor
 
 logger: logging.Logger = get_logger(__name__)
+
+
+class AssignedTable(TypedDict):
+    topic: str
+    partition: int
+    offset: int
+    metadata: Optional[str]
+    leader_epoch: Optional[int]
+    error: Optional[KafkaError]
+    seek_to_end_on_assign: bool
 
 
 class PartitionListener(Protocol):
@@ -456,19 +467,6 @@ class KafkaBaseClient(ABC):
     def _tp_sort_key(tp: TopicPartition) -> tuple[str, int]:
         return (tp.topic, tp.partition)
 
-    @property
-    def assigned_table(self) -> list[dict[str, object]]:
-        return [
-            {
-                "topic": tp.topic,
-                "partition": tp.partition,
-                "since": None,
-                "source": "group",
-                "seek_to_end_on_assign": self.seek_to_end_on_assign,
-            }
-            for tp in sorted(self._assigned_partitions, key=self._tp_sort_key)
-        ]
-
     @abstractmethod
     async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None: ...
 
@@ -692,3 +690,18 @@ class KafkaBaseClient(ABC):
         if "bootstrap.servers" not in self.producer_config or not self.producer_config["bootstrap.servers"]:
             raise ValueError("bootstrap.servers is required")
         return self.producer_config["bootstrap.servers"]
+
+    @property
+    def assigned_table(self) -> list[AssignedTable]:
+        return [
+            AssignedTable(
+                topic=tp.topic,
+                partition=tp.partition,
+                offset=tp.offset,
+                metadata=tp.metadata,
+                leader_epoch=tp.leader_epoch,
+                error=tp.error,
+                seek_to_end_on_assign=self.seek_to_end_on_assign,
+            )
+            for tp in sorted(self._assigned_partitions, key=self._tp_sort_key)
+        ]

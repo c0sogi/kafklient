@@ -428,7 +428,6 @@ class TestBaseClientAssignment(unittest.IsolatedAsyncioTestCase):
             assert "topic" in entry
             assert "partition" in entry
             assert entry["seek_to_end_on_assign"] is True
-            assert entry["source"] == "group"
         finally:
             await client.stop()
 
