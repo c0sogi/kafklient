@@ -1,7 +1,7 @@
 kafklient
 =========
 
-Async Kafka client utilities for SDML built on confluent_kafka with thread-based async wrappers.
+Async Kafka helpers that wrap confluent_kafka with typed listeners and RPC utilities.
 
 What's inside
 -------------
