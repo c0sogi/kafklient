@@ -19,6 +19,7 @@ from .backend import (
     NewTopic,
     Producer,
     TopicPartition,
+    KAFKA_ERROR_PARTITION_EOF,
 )
 from .config import CommonConfig, ConsumerConfig, ProducerConfig
 
@@ -57,4 +58,5 @@ __all__ = [
     "T_Co",
     "AdminClient",
     "NewTopic",
+    "KAFKA_ERROR_PARTITION_EOF",
 ]

@@ -5,6 +5,7 @@ import threading
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import partial
 from types import TracebackType
 from typing import (
     AsyncIterable,
@@ -21,6 +22,7 @@ from typing import (
 
 from .._logging import get_logger
 from ..types import (
+    KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
     Consumer,
@@ -64,27 +66,34 @@ def default_consumer_config() -> ConsumerConfig:
 
 
 def default_corr_from_record(rec: Message, parsed: object) -> Optional[bytes]:
+    def to_bytes(v: str | bytes | None) -> bytes | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v.encode("utf-8")
+        return v
+
     if key := rec.key():
         return bytes(key)
-    return next((bytes(v) for k, v in rec.headers() or () if k.lower() == "x-corr-id"), None)
+    return next((to_bytes(v) for k, v in rec.headers() or () if k.lower() == "x-corr-id"), None)
 
 
-def create_consumer(config: ConsumerConfig, *, logger: logging.Logger | None = None) -> Consumer:
+def create_consumer(config: ConsumerConfig) -> Consumer:
     config = config.copy()
     if "group.id" not in config or not config["group.id"]:
         config["group.id"] = f"consumer-{uuid.uuid4().hex[:8]}"
     if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
         raise ValueError("bootstrap.servers is required")
-    return Consumer(dict(config), logger=logger or get_logger(__name__))
+    return Consumer(config)  # pyright: ignore[reportArgumentType]
 
 
-def create_producer(config: ProducerConfig, *, logger: logging.Logger | None = None) -> Producer:
+def create_producer(config: ProducerConfig) -> Producer:
     config = config.copy()
     if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
         raise ValueError("bootstrap.servers is required")
     if "client.id" not in config or not config["client.id"]:
         config["client.id"] = f"producer-{uuid.uuid4().hex[:8]}"
-    return Producer(dict(config), logger=logger or get_logger(__name__))
+    return Producer(config)  # pyright: ignore[reportArgumentType]
 
 
 @dataclass(kw_only=True)
@@ -257,10 +266,7 @@ class KafkaBaseClient(ABC):
         if "bootstrap.servers" not in producer_config or not producer_config["bootstrap.servers"]:
             raise ValueError("bootstrap.servers is required for producer factory")
 
-        def _factory() -> Producer:
-            return Producer(dict(producer_config), logger=logger)
-
-        return _factory
+        return partial(create_producer, producer_config)
 
     @property
     async def producer(self) -> Producer:
@@ -278,10 +284,7 @@ class KafkaBaseClient(ABC):
         if "bootstrap.servers" not in consumer_config or not consumer_config["bootstrap.servers"]:
             raise ValueError("bootstrap.servers is required for consumer factory")
 
-        def _factory() -> Consumer:
-            return Consumer(dict(consumer_config), logger=logger)
-
-        return _factory
+        return partial(create_consumer, consumer_config)
 
     @property
     async def consumer(self) -> Consumer:
@@ -420,7 +423,7 @@ class KafkaBaseClient(ABC):
                                 continue
                             err = record.error()
                             if err:
-                                if err.code() == KafkaError._PARTITION_EOF:
+                                if err.code() == KAFKA_ERROR_PARTITION_EOF:
                                     continue
                                 logger.error(f"Kafka error: {err}")
                                 continue
@@ -502,11 +505,10 @@ class KafkaBaseClient(ABC):
                     )
                     for topic in missing_topics
                 ]
-                futures = admin.create_topics(new_topics)
 
                 # Wait for creation to complete
                 created: list[str] = []
-                for topic, future in futures.items():
+                for topic, future in admin.create_topics(new_topics).items():  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
                     try:
                         future.result(timeout=timeout)
                         created.append(topic)
@@ -577,11 +579,9 @@ class KafkaBaseClient(ABC):
                     return []
 
                 # Delete all topics
-                futures = admin.delete_topics(topics_to_delete, operation_timeout=int(timeout))
-
                 # Wait for deletion to complete
                 deleted: list[str] = []
-                for topic, future in futures.items():
+                for topic, future in admin.delete_topics(topics_to_delete, operation_timeout=int(timeout)).items():  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
                     try:
                         future.result(timeout=timeout)
                         deleted.append(topic)
@@ -603,13 +603,13 @@ class KafkaBaseClient(ABC):
     async def produce(
         self,
         topic: str,
-        value: str | bytes | None = None,
-        key: str | bytes | None = None,
+        value: bytes | None = None,
+        key: bytes | None = None,
         partition: int | None = None,
         callback: Callable[[KafkaError | None, Message], None] | None = None,
         on_delivery: Callable[[KafkaError | None, Message], None] | None = None,
         timestamp: int = 0,
-        headers: dict[str, str | bytes] | list[tuple[str, str | bytes]] | None = None,
+        headers: dict[str, str | bytes | None] | list[tuple[str, str | bytes | None]] | None = None,
         flush: bool = False,
         flush_timeout: float | None = None,
     ) -> None:

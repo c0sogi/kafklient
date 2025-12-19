@@ -1,10 +1,14 @@
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
+
 [project]
 name = "kafklient"
-version = "0.2.5"
+version = "0.2.6b0"
 description = "Async Kafka helpers built on confluent_kafka.experimental.aio."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["confluent-kafka>=2.6.0", "types-confluent-kafka>=1.4.0"]
+dependencies = ["confluent-kafka>=2.13.0"]
 
 [project.optional-dependencies]
 dev = ["pyright>=1.1.407", "ruff>=0.14.7"]

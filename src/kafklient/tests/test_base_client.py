@@ -125,7 +125,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
         try:
             await client.start()
 
-            test_headers: list[tuple[str, str | bytes]] = [
+            test_headers: list[tuple[str, str | bytes | None]] = [
                 ("x-request-id", b"req-123"),
                 ("x-trace-id", "trace-456"),
             ]
@@ -136,9 +136,17 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
             assert len(client.received_records) >= 1
             msg = client.received_records[-1]
             msg_headers = msg.headers() or []
-
-            header_dict = {k: v for k, v in msg_headers}
-            assert b"req-123" in header_dict.get("x-request-id", b"")
+            for k, v in msg_headers:
+                if k.lower() == "x-request-id":
+                    assert v == b"req-123"
+                    break
+                elif k.lower() == "x-trace-id":
+                    assert v == "trace-456"
+                    break
+                else:
+                    assert False, f"Unexpected header: {k}"
+            else:
+                assert False, "No header found"
         finally:
             await client.stop()
 

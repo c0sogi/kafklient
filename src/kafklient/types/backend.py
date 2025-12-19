@@ -21,7 +21,17 @@ from confluent_kafka import (
     Producer,
     TopicPartition,
 )
-from confluent_kafka.admin import AdminClient, ClusterMetadata, NewTopic
+from confluent_kafka.admin import AdminClient, ClusterMetadata, NewTopic  # pyright: ignore[reportPrivateImportUsage]
+
+
+def get_error_code(name: str) -> int | None:
+    prop = getattr(KafkaError, name, None)
+    if prop is None:
+        return None
+    return int(prop)
+
+
+KAFKA_ERROR_PARTITION_EOF = get_error_code("_PARTITION_EOF")
 
 __all__ = [
     "Consumer",
@@ -34,4 +44,5 @@ __all__ = [
     "KafkaException",
     "AdminClient",
     "NewTopic",
+    "KAFKA_ERROR_PARTITION_EOF",
 ]

@@ -8,6 +8,7 @@ from .clients import (
     create_producer,
 )
 from .types import (
+    KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
     ClusterMetadata,
@@ -56,4 +57,5 @@ __all__ = [
     "NewTopic",
     "get_logger",
     "logger",
+    "KAFKA_ERROR_PARTITION_EOF",
 ]
