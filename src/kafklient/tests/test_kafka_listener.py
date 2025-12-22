@@ -9,9 +9,10 @@ import asyncio
 import json
 import unittest
 import uuid
+from logging import getLogger
 from time import perf_counter
 
-from kafklient import KafkaListener, Message, logger
+from kafklient import KafkaListener, Message
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._schema import FlagRecord, HelloRecord, IdxRecord
 from kafklient.tests._utils import (
@@ -23,6 +24,8 @@ from kafklient.tests._utils import (
     make_consumer_config,
     produce_messages,
 )
+
+logger = getLogger(__name__)
 
 
 class TestKafkaListener(unittest.IsolatedAsyncioTestCase):

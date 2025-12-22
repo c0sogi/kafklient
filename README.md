@@ -7,6 +7,7 @@ What's inside
 -------------
 - `KafkaListener`: subscribe to topics and stream parsed objects.
 - `KafkaRPC`: request/response helper using correlation IDs over Kafka.
+- MCP over Kafka (optional): run an MCP server over Kafka + provide a stdio bridge (`kafklient-mcp-client`) so any MCP stdio client can connect.
 - Group-managed subscriptions only (subscribe-based). Manual assign is removed.
 
 Requirements
@@ -20,6 +21,67 @@ Install
 ```bash
 pip install kafklient
 ```
+
+MCP (Model Context Protocol) over Kafka (optional)
+-------------------------------------------------
+If you want to expose tools/resources/prompts to MCP clients over Kafka, install the optional extra:
+
+```bash
+pip install "kafklient[mcp]"
+```
+
+Quickstart (requires a reachable Kafka broker):
+
+```bash
+# 1) Start YOUR MCP server that speaks MCP(JSON-RPC) over Kafka
+#    (example below: my_mcp_server.py)
+uv run python my_mcp_server.py
+
+# 2) Start a stdio <-> Kafka bridge for MCP stdio clients (LangChain, etc.)
+uv run kafklient-mcp-client --bootstrap-servers localhost:9092
+```
+
+Example: custom MCP server over Kafka
+------------------------------------
+
+Create `my_mcp_server.py`:
+
+```python
+import logging
+
+from fastmcp import FastMCP
+
+from kafklient.mcp.server import run_server
+
+logging.basicConfig(level=logging.INFO)
+
+mcp = FastMCP("My Kafka MCP Server")
+
+
+@mcp.tool()
+def echo(message: str) -> str:
+    return f"Echo: {message}"
+
+
+@mcp.tool()
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+if __name__ == "__main__":
+    run_server(
+        mcp,
+        bootstrap_servers="localhost:9092",
+        consumer_topic="mcp-requests",
+        producer_topic="mcp-responses",
+        show_banner=False,
+        log_level="info",
+    )
+```
+
+Notes:
+- The **server <-> bridge** communication goes through Kafka topics (`mcp-requests` / `mcp-responses` by default).
+- The **client <-> bridge** communication is stdio (JSON-RPC over stdin/stdout), so avoid printing to stdout in the bridge process.
 
 Core concepts
 -------------

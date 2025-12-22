@@ -1,11 +1,11 @@
 import asyncio
 from dataclasses import dataclass, field
+from logging import getLogger
 from typing import AsyncIterator, Awaitable, Callable, Generic, Optional, Self
 
-from .._logging import get_logger
 from ..types import T
 
-logger = get_logger(__name__)
+logger = getLogger(__name__)
 
 
 @dataclass

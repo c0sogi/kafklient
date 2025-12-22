@@ -6,6 +6,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from functools import partial
+from logging import getLogger
 from types import TracebackType
 from typing import (
     AsyncIterable,
@@ -20,7 +21,6 @@ from typing import (
     final,
 )
 
-from .._logging import get_logger
 from ..types import (
     KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
@@ -38,7 +38,7 @@ from ..types import (
 )
 from ..utils.executor import DedicatedThreadExecutor
 
-logger: logging.Logger = get_logger(__name__)
+logger: logging.Logger = getLogger(__name__)
 
 
 class AssignedTable(TypedDict):
@@ -127,7 +127,7 @@ class KafkaBaseClient(ABC):
     """Maximum backoff time."""
     backoff_factor: float = 2.0
     """Backoff factor."""
-    assignment_timeout_s: float = 5.0
+    assignment_timeout_s: float = 30.0
     """Assignment timeout."""
     rebalance_listener: Optional[PartitionListener] = None
     """Rebalance listener."""
@@ -139,7 +139,7 @@ class KafkaBaseClient(ABC):
     """Number of partitions for auto-created topics."""
     topic_replication_factor: int = 1
     """Replication factor for auto-created topics."""
-    topic_create_timeout: float = 10.0
+    topic_create_timeout: float = 30.0
     """Timeout for topic creation."""
     polling_timeout: float = 0.5
     """Timeout for polling."""

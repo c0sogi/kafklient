@@ -1,4 +1,3 @@
-from ._logging import get_logger
 from .clients import (
     KafkaBaseClient,
     KafkaListener,
@@ -25,8 +24,6 @@ from .types import (
     TopicPartition,
 )
 from .utils import Broadcaster, Callback, DedicatedThreadExecutor, TypeStream, Waiter
-
-logger = get_logger(__name__)
 
 __all__ = [
     "KafkaBaseClient",
@@ -55,7 +52,5 @@ __all__ = [
     "Waiter",
     "DedicatedThreadExecutor",
     "NewTopic",
-    "get_logger",
-    "logger",
     "KAFKA_ERROR_PARTITION_EOF",
 ]

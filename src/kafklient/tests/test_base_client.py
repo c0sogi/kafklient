@@ -14,16 +14,19 @@ import json
 import unittest
 import uuid
 from dataclasses import dataclass, field
+from logging import getLogger
 from time import perf_counter
 from typing import Optional, Type
 
-from kafklient import KafkaBaseClient, Message, logger
+from kafklient import KafkaBaseClient, Message
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._utils import (
     get_topic_and_group_id,
     make_consumer_config,
     make_producer_config,
 )
+
+logger = getLogger(__name__)
 
 
 @dataclass

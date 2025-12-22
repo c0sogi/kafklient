@@ -1,11 +1,11 @@
 import asyncio
 import contextlib
+from logging import getLogger
 from typing import Generic, NamedTuple, Optional, Self, Type
 
-from .._logging import get_logger
 from ..types import T_Co
 
-logger = get_logger(__name__)
+logger = getLogger(__name__)
 
 
 class Waiter(NamedTuple, Generic[T_Co]):

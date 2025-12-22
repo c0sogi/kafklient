@@ -1,10 +1,11 @@
 import asyncio
 import json
 import unittest
+from logging import getLogger
 from time import perf_counter
 from typing import cast
 
-from kafklient import KafkaRPC, Message, logger
+from kafklient import KafkaRPC, Message
 from kafklient.tests._config import TEST_TIMEOUT
 from kafklient.tests._schema import EchoPayload, RPCResponsePayload
 from kafklient.tests._utils import (
@@ -17,6 +18,8 @@ from kafklient.tests._utils import (
     make_consumer_config,
     make_producer_config,
 )
+
+logger = getLogger(__name__)
 
 
 class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):

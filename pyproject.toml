@@ -8,10 +8,12 @@ version = "0.2.6b0"
 description = "Async Kafka helpers built on confluent_kafka.experimental.aio."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["confluent-kafka>=2.13.0"]
+dependencies = ["confluent-kafka>=2.12.0"]
 
 [project.optional-dependencies]
 dev = ["pyright>=1.1.407", "ruff>=0.14.7"]
+mcp = ["fastmcp>=2.14.1"]
+all = ["kafklient[dev]", "kafklient[mcp]"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
@@ -22,6 +24,7 @@ package = true
 [project.scripts]
 kafklient-benchmark = "kafklient.tests.benchmark:main"
 kafklient-test = "kafklient.tests.__main__:main"
+kafklient-mcp-client = "kafklient.mcp.client:main"
 
 [tool.ruff]
 line-length = 120
