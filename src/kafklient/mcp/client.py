@@ -15,9 +15,28 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
 from kafklient.clients.listener import KafkaListener
+from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
 
 logger = logging.getLogger(__name__)
+REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
+SESSION_ID_HEADER_KEY = "x-session-id"
+
+
+def _extract_header_bytes(record: KafkaMessage, header_key: str) -> bytes | None:
+    try:
+        headers = record.headers() or []
+    except Exception:
+        headers = []
+    for k, v in headers:
+        if k.lower() != header_key.lower():
+            continue
+        if v is None:
+            return None
+        if isinstance(v, bytes):
+            return v
+        return str(v).encode("utf-8")
+    return None
 
 
 def _parse_value(raw: str) -> object:
@@ -67,6 +86,10 @@ async def kafka_client_transport(
     consumer_group_id: str | None = None,
     consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
     producer_config: ProducerConfig = {},
+    auto_create_topics: bool = True,
+    assignment_timeout_s: float = 5.0,
+    session_id: bytes | None = None,
+    isolate_session: bool = True,
 ) -> AsyncIterator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]]]:
     """
     Client Transport: Server와 반대로 동작합니다.
@@ -80,8 +103,8 @@ async def kafka_client_transport(
         parsers=[
             {
                 "topics": [consumer_topic],
-                "parser": lambda x: JSONRPCMessage.model_validate_json(x.value() or b""),
-                "type": JSONRPCMessage,
+                "parser": lambda x: x,  # raw record (headers 포함)
+                "type": KafkaMessage,
             }
         ],
         consumer_config=consumer_config
@@ -90,19 +113,33 @@ async def kafka_client_transport(
             "group.id": consumer_group_id or f"mcp-client-{uuid4().hex}",
         },
         producer_config=producer_config | {"bootstrap.servers": bootstrap_servers},
+        auto_create_topics=auto_create_topics,
+        assignment_timeout_s=assignment_timeout_s,
     )
+
+    # Best-effort topic creation:
+    # - 응답 토픽(consumer_topic)은 구독 전에 존재해야 안정적입니다(브로커 auto-create 비활성 환경 고려).
+    # - 요청 토픽(producer_topic)은 produce 전에 존재해야 할 수 있습니다.
+    if auto_create_topics:
+        await listener.create_topics(consumer_topic, producer_topic)
 
     # IMPORTANT NOTE:
     # Ensure the response consumer is fully started/assigned *before* we allow any
     # stdio->Kafka writes to happen (otherwise a fast server response can be missed
     # because this library seeks to end on assignment).
-    stream = await listener.subscribe(JSONRPCMessage)
+    stream = await listener.subscribe(KafkaMessage)
 
     # 2. Kafka(Response) -> Client (Reader)
     async def kafka_reader():
         try:
             async with read_stream_writer:
-                async for msg in stream:
+                async for record in stream:
+                    if isolate_session and session_id is not None:
+                        sid = _extract_header_bytes(record, SESSION_ID_HEADER_KEY)
+                        # 격리 모드에서는 "내 세션"이 아닌 메시지는 드롭합니다.
+                        if sid != session_id:
+                            continue
+                    msg = JSONRPCMessage.model_validate_json(record.value() or b"")
                     await read_stream_writer.send(SessionMessage(msg))
         except anyio.ClosedResourceError:
             await checkpoint()
@@ -115,7 +152,17 @@ async def kafka_client_transport(
             async with write_stream_reader:
                 async for session_message in write_stream_reader:
                     json_str: str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
-                    await listener.produce(producer_topic, json_str.encode("utf-8"))
+                    # 세션 격리를 위해, 서버가 "어느 응답 토픽으로 보내야 하는지"를 알 수 있도록 reply-topic 헤더를 부착합니다.
+                    headers: list[tuple[str, str | bytes | None]] = [
+                        (REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))
+                    ]
+                    if isolate_session and session_id is not None:
+                        headers.append((SESSION_ID_HEADER_KEY, session_id))
+                    await listener.produce(
+                        producer_topic,
+                        json_str.encode("utf-8"),
+                        headers=headers,
+                    )
         except anyio.ClosedResourceError:
             await checkpoint()
         finally:
@@ -135,7 +182,14 @@ async def run_client_async(
     consumer_group_id: Optional[str] = None,
     consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
     producer_config: ProducerConfig = {},
+    isolate_session: bool = True,
+    auto_create_topics: bool = True,
+    assignment_timeout_s: float = 5.0,
 ) -> None:
+    # 세션 격리 모드에서는 브릿지 인스턴스별 session_id로 응답을 필터링합니다.
+    # => 토픽을 인스턴스별로 새로 만들지 않아도(공용 mcp-responses) 논리적 격리가 가능.
+    session_id: bytes | None = uuid4().hex.encode("utf-8") if isolate_session else None
+
     async with stdio_server() as (stdio_read, stdio_write):
         async with kafka_client_transport(
             bootstrap_servers=bootstrap_servers,
@@ -144,6 +198,10 @@ async def run_client_async(
             consumer_group_id=consumer_group_id,
             consumer_config=consumer_config,
             producer_config=producer_config,
+            auto_create_topics=auto_create_topics,
+            assignment_timeout_s=assignment_timeout_s,
+            session_id=session_id,
+            isolate_session=isolate_session,
         ) as (kafka_read, kafka_write):
             # NOTE:
             # The stdio client expects the spawned process to exit when stdin is closed.
@@ -190,8 +248,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--consumer-topic",
-        default=os.getenv("KAFKLIENT_MCP_CONSUMER_TOPIC", "mcp-responses"),
-        help="Kafka topic to read responses/notifications from (default: %(default)s)",
+        default=None,
+        help=(
+            "Kafka topic to read responses/notifications from. "
+            "If omitted, uses $KAFKLIENT_MCP_CONSUMER_TOPIC or 'mcp-responses'. "
+            "When session isolation is enabled, messages are filtered by the 'x-session-id' header."
+        ),
     )
     parser.add_argument(
         "--producer-topic",
@@ -202,6 +264,28 @@ def main(argv: list[str] | None = None) -> None:
         "--consumer-group-id",
         default=os.getenv("KAFKLIENT_MCP_CONSUMER_GROUP_ID"),
         help="Kafka consumer group id for the response consumer (default: auto-generated)",
+    )
+    default_isolate_session = os.getenv("KAFKLIENT_MCP_ISOLATE_SESSION", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+    isolate_group = parser.add_mutually_exclusive_group()
+    isolate_group.add_argument(
+        "--isolate-session",
+        dest="isolate_session",
+        action="store_true",
+        default=default_isolate_session,
+        help=(
+            "Enable session isolation (default: true). "
+            "When enabled and --consumer-topic is not provided, an instance-unique response topic is used."
+        ),
+    )
+    isolate_group.add_argument(
+        "--no-isolate-session",
+        dest="isolate_session",
+        action="store_false",
+        help="Disable session isolation (forces using the provided/default response topic as-is).",
     )
     parser.add_argument(
         "--consumer-config",
@@ -265,11 +349,16 @@ def main(argv: list[str] | None = None) -> None:
     asyncio.run(
         run_client_async(
             bootstrap_servers=str(ns.bootstrap_servers),
-            consumer_topic=str(ns.consumer_topic),
+            consumer_topic=str(
+                ns.consumer_topic
+                if ns.consumer_topic is not None
+                else os.getenv("KAFKLIENT_MCP_CONSUMER_TOPIC", "mcp-responses")
+            ),
             producer_topic=str(ns.producer_topic),
             consumer_group_id=(str(ns.consumer_group_id) if ns.consumer_group_id else None),
             consumer_config=consumer_config,
             producer_config=producer_config,
+            isolate_session=bool(ns.isolate_session),
         )
     )
 

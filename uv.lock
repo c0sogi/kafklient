@@ -573,7 +573,7 @@ wheels = [
 
 [[package]]
 name = "kafklient"
-version = "0.2.6b0"
+version = "0.3.1b0"
 source = { editable = "." }
 dependencies = [
     { name = "confluent-kafka" },
