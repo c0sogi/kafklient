@@ -4,9 +4,11 @@ import asyncio
 import queue
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeVar
+from typing import Callable, TypeVar
 
 T = TypeVar("T")
+
+FutureFactory = tuple[Callable[[], object], asyncio.Future[object]] | None
 
 
 @dataclass
@@ -20,9 +22,7 @@ class DedicatedThreadExecutor:
 
     name: str = "kafka-worker"
 
-    _queue: queue.Queue[tuple[Callable[[], Any], asyncio.Future[Any]] | None] = field(
-        default_factory=queue.Queue, init=False, repr=False
-    )
+    _queue: queue.Queue[FutureFactory] = field(default_factory=queue.Queue[FutureFactory], init=False, repr=False)
     _thread: threading.Thread | None = field(default=None, init=False, repr=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
 
@@ -64,8 +64,7 @@ class DedicatedThreadExecutor:
         if not self.is_running or not self._loop:
             raise RuntimeError("Executor not started")
 
-        future: asyncio.Future[T] = self._loop.create_future()
-        self._queue.put((func, future))
+        self._queue.put((func, (future := self._loop.create_future())))
         return await future
 
     @property

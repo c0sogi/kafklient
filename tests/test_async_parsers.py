@@ -18,9 +18,9 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Optional, Type
 
-from kafklient import KafkaBaseClient, Message
-from kafklient.tests._config import TEST_TIMEOUT
-from kafklient.tests._utils import (
+from kafklient import KafkaBaseClient, Message, Parser
+from tests._config import TEST_TIMEOUT
+from tests._utils import (
     get_topic_and_group_id,
     make_consumer_config,
     make_producer_config,
@@ -107,7 +107,7 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=sync_parser)],
             auto_create_topics=True,
         )
 
@@ -131,7 +131,7 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": async_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=async_parser)],
             auto_create_topics=True,
         )
 
@@ -154,7 +154,7 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": lambda r: async_parser(r)}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=lambda r: async_parser(r))],
             auto_create_topics=True,
         )
 
@@ -177,9 +177,7 @@ class TestAsyncParsers(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[
-                {"topics": [topic], "type": ParsedMessage, "parser": partial(async_parser_with_arg, extra="partial")}
-            ],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=partial(async_parser_with_arg, extra="partial"))],
             auto_create_topics=True,
         )
 
@@ -206,7 +204,7 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=sync_parser)],
             corr_from_record=sync_corr,
             auto_create_topics=True,
         )
@@ -228,7 +226,7 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=sync_parser)],
             corr_from_record=async_corr,
             auto_create_topics=True,
         )
@@ -250,7 +248,7 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=sync_parser)],
             corr_from_record=lambda r, p: async_corr(r, p),
             auto_create_topics=True,
         )
@@ -272,7 +270,7 @@ class TestAsyncCorrelationExtractor(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=sync_parser)],
             corr_from_record=partial(async_corr_with_arg, prefix="partial"),
             auto_create_topics=True,
         )
@@ -298,7 +296,7 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": async_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=async_parser)],
             corr_from_record=async_corr,
             auto_create_topics=True,
         )
@@ -323,7 +321,7 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": lambda r: async_parser(r)}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=lambda r: async_parser(r))],
             corr_from_record=partial(async_corr_with_arg, prefix="combo"),
             auto_create_topics=True,
         )
@@ -348,9 +346,7 @@ class TestAsyncParserAndCorrelationCombinations(unittest.IsolatedAsyncioTestCase
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[
-                {"topics": [topic], "type": ParsedMessage, "parser": partial(async_parser_with_arg, extra="mixed")}
-            ],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=partial(async_parser_with_arg, extra="mixed"))],
             corr_from_record=lambda r, p: async_corr(r, p),
             auto_create_topics=True,
         )
@@ -387,7 +383,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": str, "parser": nullable_parser}],
+            parsers=[Parser[str | None](topics=[topic], factory=nullable_parser)],
             auto_create_topics=True,
         )
 
@@ -413,7 +409,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
         client = AsyncParserTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": ParsedMessage, "parser": sync_parser}],
+            parsers=[Parser[ParsedMessage](topics=[topic], factory=sync_parser)],
             corr_from_record=nullable_corr,
             auto_create_topics=True,
         )
@@ -438,8 +434,8 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
             parsers=[
-                {"topics": [topic], "type": ParsedMessage, "parser": sync_parser},
-                {"topics": [topic], "type": ParsedMessage, "parser": async_parser},
+                Parser[ParsedMessage](topics=[topic], factory=sync_parser),
+                Parser[ParsedMessage](topics=[topic], factory=async_parser),
             ],
             auto_create_topics=True,
         )

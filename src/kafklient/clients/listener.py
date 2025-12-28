@@ -1,13 +1,13 @@
 import asyncio
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import Optional, Type
+from typing import Optional, Type, TypeVar
 
-from ..types import T
 from ..types.backend import Message
 from ..utils.task import TypeStream
 from .base_client import KafkaBaseClient
 
+T = TypeVar("T")
 logger = getLogger(__name__)
 
 
@@ -38,7 +38,7 @@ class KafkaListener(KafkaBaseClient):
         q, event = self.subscriptions[tp]
         return TypeStream[T](q, event)  # pyright: ignore[reportArgumentType]
 
-    async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None:
+    async def _on_record(self, record: Message, parsed: tuple[T, Type[T]], cid: Optional[bytes]) -> None:
         obj, ot = parsed
         q_event = self.subscriptions.get(ot)
         if q_event is None:

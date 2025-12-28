@@ -573,9 +573,10 @@ wheels = [
 
 [[package]]
 name = "kafklient"
-version = "0.3.1b0"
+version = "0.3.1b1"
 source = { editable = "." }
 dependencies = [
+    { name = "beartype" },
     { name = "confluent-kafka" },
 ]
 
@@ -595,6 +596,7 @@ mcp = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beartype", specifier = ">=0.22.9" },
     { name = "confluent-kafka", specifier = ">=2.12.0" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.14.1" },
     { name = "kafklient", extras = ["dev"], marker = "extra == 'all'" },

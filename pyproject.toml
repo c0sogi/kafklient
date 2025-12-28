@@ -4,11 +4,11 @@ build-backend = "uv_build"
 
 [project]
 name = "kafklient"
-version = "0.3.1b0"
+version = "0.3.1b1"
 description = "Async Kafka helpers built on confluent_kafka."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["confluent-kafka>=2.12.0"]
+dependencies = ["beartype>=0.22.9", "confluent-kafka>=2.12.0"]
 
 [project.optional-dependencies]
 dev = ["pyright>=1.1.407", "ruff>=0.14.7"]
@@ -22,8 +22,8 @@ typeCheckingMode = "strict"
 package = true
 
 [project.scripts]
-kafklient-benchmark = "kafklient.tests.benchmark:main"
-kafklient-test = "kafklient.tests.__main__:main"
+kafklient-benchmark = "tests.benchmark:main"
+kafklient-test = "tests.__main__:main"
 kafklient-mcp-client = "kafklient.mcp.client:main"
 
 [tool.ruff]

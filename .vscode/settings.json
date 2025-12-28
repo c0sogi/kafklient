@@ -1,9 +1,0 @@
-{
-    "python.testing.unittestArgs": [
-        "-v",
-        "-s",
-        "src/kafklient/tests",
-        "-p",
-        "test_*.py"
-    ]
-}

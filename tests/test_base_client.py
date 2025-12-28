@@ -19,8 +19,9 @@ from time import perf_counter
 from typing import Optional, Type
 
 from kafklient import KafkaBaseClient, Message
-from kafklient.tests._config import TEST_TIMEOUT
-from kafklient.tests._utils import (
+from kafklient.types.parser import Parser
+from tests._config import TEST_TIMEOUT
+from tests._utils import (
     get_topic_and_group_id,
     make_consumer_config,
     make_producer_config,
@@ -63,7 +64,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -95,7 +96,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -121,7 +122,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -159,7 +160,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -203,7 +204,7 @@ class TestBaseClientPoll(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             seek_to_end_on_assign=False,  # Get messages from beginning
             auto_create_topics=True,
         )
@@ -235,7 +236,7 @@ class TestBaseClientPoll(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [empty_topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[empty_topic])],
             auto_create_topics=True,
         )
 
@@ -262,7 +263,7 @@ class TestBaseClientLifecycle(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -282,7 +283,7 @@ class TestBaseClientLifecycle(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -299,7 +300,7 @@ class TestBaseClientLifecycle(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -314,7 +315,7 @@ class TestBaseClientLifecycle(unittest.IsolatedAsyncioTestCase):
         async with SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         ) as client:
             assert client.closed is False
@@ -339,7 +340,7 @@ class TestBaseClientAutoCreateTopics(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [unique_topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[unique_topic])],
             auto_create_topics=True,
             topic_num_partitions=1,
             topic_replication_factor=1,
@@ -367,7 +368,7 @@ class TestBaseClientFlush(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             auto_create_topics=True,
         )
 
@@ -402,7 +403,7 @@ class TestBaseClientAssignment(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             assignment_timeout_s=30.0,
             auto_create_topics=True,
         )
@@ -424,7 +425,7 @@ class TestBaseClientAssignment(unittest.IsolatedAsyncioTestCase):
         client = SimpleTestClient(
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(group_id),
-            parsers=[{"topics": [topic], "type": Message, "parser": lambda r: r}],
+            parsers=[Parser[Message](topics=[topic])],
             seek_to_end_on_assign=True,
             auto_create_topics=True,
         )

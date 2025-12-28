@@ -1,10 +1,9 @@
 import asyncio
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import AsyncIterator, Awaitable, Callable, Generic, Optional, Self
+from typing import AsyncIterator, Awaitable, Callable, Generic, Optional, Self, TypeVar
 
-from ..types import T
-
+T = TypeVar("T")
 logger = getLogger(__name__)
 
 

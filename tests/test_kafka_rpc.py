@@ -6,9 +6,10 @@ from time import perf_counter
 from typing import cast
 
 from kafklient import KafkaRPC, Message
-from kafklient.tests._config import TEST_TIMEOUT
-from kafklient.tests._schema import EchoPayload, RPCResponsePayload
-from kafklient.tests._utils import (
+from kafklient.types.parser import Parser
+from tests._config import TEST_TIMEOUT
+from tests._schema import EchoPayload, RPCResponsePayload
+from tests._utils import (
     as_int,
     as_str,
     create_echo_rpc_server,
@@ -32,7 +33,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
             return rec.value() or b""
 
         rpc = KafkaRPC(
-            parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
+            parsers=[Parser[bytes](topics=[reply_topic], factory=parse_reply)],
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(client_group),
             auto_create_topics=True,
@@ -111,13 +112,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
             )
 
         rpc = KafkaRPC(
-            parsers=[
-                {
-                    "topics": [reply_topic],
-                    "type": RPCResponsePayload,
-                    "parser": parse_json_reply,
-                }
-            ],
+            parsers=[Parser[RPCResponsePayload](topics=[reply_topic], factory=parse_json_reply)],
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(client_group),
             auto_create_topics=True,
@@ -186,7 +181,7 @@ class TestKafkaRPC(unittest.IsolatedAsyncioTestCase):
             return rec.value() or b""
 
         rpc = KafkaRPC(
-            parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
+            parsers=[Parser[bytes](topics=[reply_topic], factory=parse_reply)],
             producer_config=make_producer_config(),
             consumer_config=make_consumer_config(client_group),
             auto_create_topics=True,

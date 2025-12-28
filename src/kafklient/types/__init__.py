@@ -1,45 +1,18 @@
-from typing import (
-    Awaitable,
-    Callable,
-    Generic,
-    Type,
-    TypedDict,
-    TypeVar,
-    Union,
-)
-
 from .backend import (
+    KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
-    ClusterMetadata,
+    ClusterMetadata,  # pyright: ignore[reportPrivateImportUsage]
     Consumer,
     KafkaError,
     KafkaException,
     Message,
-    NewTopic,
+    NewTopic,  # pyright: ignore[reportPrivateImportUsage]
     Producer,
     TopicPartition,
-    KAFKA_ERROR_PARTITION_EOF,
 )
 from .config import CommonConfig, ConsumerConfig, ProducerConfig
-
-T = TypeVar("T")
-T_Co = TypeVar("T_Co", covariant=True)
-
-# Parser callback can be sync or async
-ParserCallback = Callable[[Message], Union[T, Awaitable[T]]]
-
-# Correlation extractor callback can be sync or async
-CorrelationCallback = Callable[[Message, object], Union[bytes | None, Awaitable[bytes | None]]]
-
-
-class ParserSpec(TypedDict, Generic[T_Co]):
-    """Specify the parser and the range of Kafka input (consume) in one go"""
-
-    topics: list[str]
-    type: Type[T_Co]
-    parser: ParserCallback[T_Co]
-
+from .parser import CorrelationCallback, Parser
 
 __all__ = [
     "ClusterMetadata",
@@ -51,11 +24,10 @@ __all__ = [
     "OFFSET_END",
     "TopicPartition",
     "KafkaException",
-    "ParserSpec",
+    "Parser",
     "ConsumerConfig",
     "ProducerConfig",
     "CommonConfig",
-    "T_Co",
     "AdminClient",
     "NewTopic",
     "KAFKA_ERROR_PARTITION_EOF",

@@ -13,9 +13,10 @@ from logging import getLogger
 from time import perf_counter
 
 from kafklient import KafkaListener, Message
-from kafklient.tests._config import TEST_TIMEOUT
-from kafklient.tests._schema import FlagRecord, HelloRecord, IdxRecord
-from kafklient.tests._utils import (
+from kafklient.types.parser import Parser
+from tests._config import TEST_TIMEOUT
+from tests._schema import FlagRecord, HelloRecord, IdxRecord
+from tests._utils import (
     as_bool,
     as_int,
     as_str,
@@ -41,13 +42,7 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
             return HelloRecord(message=message, count=count)
 
         listener = KafkaListener(
-            parsers=[
-                {
-                    "topics": [topic],
-                    "type": HelloRecord,
-                    "parser": parse_hello,
-                }
-            ],
+            parsers=[Parser[HelloRecord](topics=[topic], factory=parse_hello)],
             consumer_config=make_consumer_config(group_id),
             auto_create_topics=True,
         )
@@ -91,13 +86,7 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
             return IdxRecord(idx=as_int(data.get("idx")))
 
         listener = KafkaListener(
-            parsers=[
-                {
-                    "topics": [topic],
-                    "type": IdxRecord,
-                    "parser": parse_idx,
-                }
-            ],
+            parsers=[Parser[IdxRecord](topics=[topic], factory=parse_idx)],
             consumer_config=make_consumer_config(group_id),
             auto_create_topics=True,
         )
@@ -152,13 +141,7 @@ class TestKafkaListener(unittest.IsolatedAsyncioTestCase):
             return FlagRecord(test=as_bool(data.get("test")))
 
         async with KafkaListener(
-            parsers=[
-                {
-                    "topics": [topic],
-                    "type": FlagRecord,
-                    "parser": parse_flag,
-                }
-            ],
+            parsers=[Parser[FlagRecord](topics=[topic], factory=parse_flag)],
             consumer_config=make_consumer_config(group_id),
             auto_create_topics=True,
         ) as listener:

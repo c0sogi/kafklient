@@ -19,6 +19,7 @@ from mcp.types import JSONRPCMessage
 from kafklient.clients.listener import KafkaListener
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
+from kafklient.types.parser import Parser
 
 logger = logging.getLogger(__name__)
 REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
@@ -96,13 +97,7 @@ async def kafka_server_transport(
     write_stream, write_stream_reader = anyio.create_memory_object_stream[SessionMessage](0)
 
     listener = KafkaListener(
-        parsers=[
-            {
-                "topics": [consumer_topic],
-                "parser": lambda x: JSONRPCMessage.model_validate_json(x.value() or b""),
-                "type": JSONRPCMessage,
-            }
-        ],
+        parsers=[Parser[JSONRPCMessage](topics=[consumer_topic])],
         consumer_config=consumer_config
         | {
             "bootstrap.servers": bootstrap_servers,
@@ -222,13 +217,7 @@ async def run_server_async(
             )
 
             listener = KafkaListener(
-                parsers=[
-                    {
-                        "topics": [consumer_topic],
-                        "parser": lambda x: x,  # raw Kafka record (headers 포함)
-                        "type": KafkaMessage,
-                    }
-                ],
+                parsers=[Parser[KafkaMessage](topics=[consumer_topic])],
                 consumer_config=consumer_config
                 | {
                     "bootstrap.servers": bootstrap_servers,

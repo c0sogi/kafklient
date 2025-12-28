@@ -4,9 +4,9 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import Awaitable, Callable, Literal, Optional, Type, Union, override
+from typing import Awaitable, Callable, Literal, Optional, Type, TypeVar, Union, override
 
-from ..types import KafkaError, Producer, T
+from ..types import KafkaError, Producer
 from ..types.backend import KafkaException, Message, TopicPartition
 from ..utils.task import Waiter
 from .base_client import KafkaBaseClient, PartitionListener
@@ -14,6 +14,7 @@ from .base_client import KafkaBaseClient, PartitionListener
 logger: logging.Logger = getLogger(__name__)
 
 # Handler type: sync or async function that takes parsed request and returns response bytes
+T = TypeVar("T")
 RequestHandler = Callable[[T, Message], Union[bytes, Awaitable[bytes]]]
 
 

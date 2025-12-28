@@ -1,10 +1,9 @@
 import asyncio
 import contextlib
 from logging import getLogger
-from typing import Generic, NamedTuple, Optional, Self, Type
+from typing import Generic, NamedTuple, Optional, Self, Type, TypeVar
 
-from ..types import T_Co
-
+T_Co = TypeVar("T_Co", covariant=True)
 logger = getLogger(__name__)
 
 

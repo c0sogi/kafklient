@@ -1,10 +1,11 @@
 import asyncio
+import traceback
 import unittest
 import uuid
 from datetime import timedelta
 from typing import Any, cast
 
-from kafklient.tests._config import KAFKA_BOOTSTRAP, TEST_TIMEOUT
+from tests._config import KAFKA_BOOTSTRAP, TEST_TIMEOUT
 
 
 class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
@@ -21,8 +22,9 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
             from fastmcp import FastMCP
             from mcp.client.session import ClientSession
             from mcp.client.stdio import StdioServerParameters, stdio_client
-        except Exception as e:  # pragma: no cover
-            raise unittest.SkipTest(f"MCP dependencies not installed: {e!r}")
+        except Exception:  # pragma: no cover
+            trb = traceback.format_exc()
+            raise unittest.SkipTest(f"MCP dependencies not installed: {trb}")
 
         from kafklient.mcp.server import run_server_async
 
@@ -132,8 +134,9 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
             from fastmcp import FastMCP
             from mcp.client.session import ClientSession
             from mcp.client.stdio import StdioServerParameters, stdio_client
-        except Exception as e:  # pragma: no cover
-            raise unittest.SkipTest(f"MCP dependencies not installed: {e!r}")
+        except Exception:
+            trb = traceback.format_exc()
+            raise unittest.SkipTest(f"MCP dependencies not installed: {trb}")
 
         from kafklient.mcp.server import run_server_async
 

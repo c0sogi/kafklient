@@ -17,6 +17,7 @@ from mcp.types import JSONRPCMessage
 from kafklient.clients.listener import KafkaListener
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
+from kafklient.types.parser import Parser
 
 logger = logging.getLogger(__name__)
 REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
@@ -89,7 +90,6 @@ async def kafka_client_transport(
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
     session_id: bytes | None = None,
-    isolate_session: bool = True,
 ) -> AsyncIterator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]]]:
     """
     Client Transport: Server와 반대로 동작합니다.
@@ -100,13 +100,7 @@ async def kafka_client_transport(
     write_stream, write_stream_reader = anyio.create_memory_object_stream[SessionMessage](0)
 
     listener = KafkaListener(
-        parsers=[
-            {
-                "topics": [consumer_topic],
-                "parser": lambda x: x,  # raw record (headers 포함)
-                "type": KafkaMessage,
-            }
-        ],
+        parsers=[Parser[KafkaMessage](topics=[consumer_topic])],
         consumer_config=consumer_config
         | {
             "bootstrap.servers": bootstrap_servers,
@@ -134,7 +128,7 @@ async def kafka_client_transport(
         try:
             async with read_stream_writer:
                 async for record in stream:
-                    if isolate_session and session_id is not None:
+                    if session_id is not None:
                         sid = _extract_header_bytes(record, SESSION_ID_HEADER_KEY)
                         # 격리 모드에서는 "내 세션"이 아닌 메시지는 드롭합니다.
                         if sid != session_id:
@@ -156,7 +150,7 @@ async def kafka_client_transport(
                     headers: list[tuple[str, str | bytes | None]] = [
                         (REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))
                     ]
-                    if isolate_session and session_id is not None:
+                    if session_id is not None:
                         headers.append((SESSION_ID_HEADER_KEY, session_id))
                     await listener.produce(
                         producer_topic,
@@ -189,6 +183,7 @@ async def run_client_async(
     # 세션 격리 모드에서는 브릿지 인스턴스별 session_id로 응답을 필터링합니다.
     # => 토픽을 인스턴스별로 새로 만들지 않아도(공용 mcp-responses) 논리적 격리가 가능.
     session_id: bytes | None = uuid4().hex.encode("utf-8") if isolate_session else None
+    logger.debug(f"Session ID: {session_id.decode('utf-8') if session_id else '<none>'}")
 
     async with stdio_server() as (stdio_read, stdio_write):
         async with kafka_client_transport(
@@ -201,7 +196,6 @@ async def run_client_async(
             auto_create_topics=auto_create_topics,
             assignment_timeout_s=assignment_timeout_s,
             session_id=session_id,
-            isolate_session=isolate_session,
         ) as (kafka_read, kafka_write):
             # NOTE:
             # The stdio client expects the spawned process to exit when stdin is closed.

@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 from kafklient import KafkaListener, KafkaRPC, Message, create_producer
+from kafklient.types.parser import Parser
 
 from ._config import KAFKA_BOOTSTRAP
 from ._utils import (
@@ -89,7 +90,7 @@ async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
         return SimpleRecord(value=str(data.get("value", "")))
 
     listener = KafkaListener(
-        parsers=[{"topics": [topic], "type": SimpleRecord, "parser": parse_record}],
+        parsers=[Parser[SimpleRecord](topics=[topic], factory=parse_record)],
         consumer_config=make_consumer_config(group_id),
         auto_create_topics=True,
     )
@@ -154,7 +155,7 @@ async def benchmark_rpc(iterations: int, warmup: int) -> BenchmarkResult:
         return rec.value() or b""
 
     rpc = KafkaRPC(
-        parsers=[{"topics": [reply_topic], "type": bytes, "parser": parse_reply}],
+        parsers=[Parser[bytes](topics=[reply_topic], factory=parse_reply)],
         producer_config=make_producer_config(),
         consumer_config=make_consumer_config(client_group),
         auto_create_topics=True,

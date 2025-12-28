@@ -2,9 +2,10 @@ import asyncio
 import unittest
 
 from kafklient import KafkaListener, Message
-from kafklient.tests._config import TEST_TIMEOUT
-from kafklient.tests._schema import FlagRecord
-from kafklient.tests._utils import (
+from kafklient.types.parser import Parser
+from tests._config import TEST_TIMEOUT
+from tests._schema import FlagRecord
+from tests._utils import (
     as_bool,
     get_topic_and_group_id,
     loads_json,
@@ -23,13 +24,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             return FlagRecord(test=as_bool(data.get("test")))
 
         listener = KafkaListener(
-            parsers=[
-                {
-                    "topics": [topic],
-                    "type": FlagRecord,
-                    "parser": parse_flag,
-                }
-            ],
+            parsers=[Parser[FlagRecord](topics=[topic], factory=parse_flag)],
             consumer_config=make_consumer_config(group_id),
             auto_create_topics=True,
         )
@@ -65,13 +60,7 @@ class TestEdgeCases(unittest.IsolatedAsyncioTestCase):
             return rec.value() or b""
 
         listener = KafkaListener(
-            parsers=[
-                {
-                    "topics": [topic],
-                    "type": bytes,
-                    "parser": parse_raw,
-                }
-            ],
+            parsers=[Parser[bytes](topics=[topic], factory=parse_raw)],
             seek_to_end_on_assign=False,
             consumer_config=make_consumer_config(group_id),
             auto_create_topics=True,

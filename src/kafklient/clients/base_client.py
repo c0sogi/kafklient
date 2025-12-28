@@ -18,26 +18,26 @@ from typing import (
     Self,
     Type,
     TypedDict,
+    TypeVar,
     final,
 )
 
-from ..types import (
+from ..types.backend import (
     KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
     Consumer,
-    ConsumerConfig,
-    CorrelationCallback,
     KafkaError,
     Message,
-    NewTopic,
-    ParserSpec,
+    NewTopic,  # pyright: ignore[reportPrivateImportUsage]
     Producer,
-    ProducerConfig,
     TopicPartition,
 )
+from ..types.config import ConsumerConfig, ProducerConfig
+from ..types.parser import CorrelationCallback, Parser
 from ..utils.executor import DedicatedThreadExecutor
 
+T = TypeVar("T")
 logger: logging.Logger = getLogger(__name__)
 
 
@@ -103,7 +103,7 @@ class KafkaBaseClient(ABC):
     """
 
     # Main Configuration
-    parsers: Iterable[ParserSpec[object]]
+    parsers: Iterable[Parser[object]]
     """List of parser specs by topic. Each spec contains:
     - topics: list of topics to parse
     - type: type of the parsed object
@@ -131,6 +131,12 @@ class KafkaBaseClient(ABC):
     """Assignment timeout."""
     rebalance_listener: Optional[PartitionListener] = None
     """Rebalance listener."""
+
+    # Parser safety / error handling
+    validate_parser_output: bool = True
+    """Validate that parser output matches spec['type'] (and nullable rules)."""
+    on_parser_error: Literal["ignore", "log", "raise"] = "log"
+    """What to do when a parser fails or returns an invalid type."""
 
     # Auto Topic Creation
     auto_create_topics: bool = False
@@ -173,7 +179,7 @@ class KafkaBaseClient(ABC):
         """Ensure the consumer has an assignment before proceeding.
         Raises TimeoutError if the assignment is not received within the timeout.
         """
-        if not self.subscribed_topics:
+        if not self.topics:
             return
         await self.consumer
         if timeout is None:
@@ -191,9 +197,9 @@ class KafkaBaseClient(ABC):
         self._producer_executor.start(self._loop, name=f"{self.__class__.__name__}-producer")
 
         # Auto-create topics if enabled
-        if self.auto_create_topics and self.subscribed_topics:
+        if self.auto_create_topics and self.topics:
             await self.create_topics(
-                *self.subscribed_topics,
+                *self.topics,
                 timeout=self.topic_create_timeout,
                 num_partitions=self.topic_num_partitions,
                 replication_factor=self.topic_replication_factor,
@@ -385,23 +391,28 @@ class KafkaBaseClient(ABC):
                     record: Message,
                 ) -> AsyncIterable[tuple[tuple[object, Type[object]], Optional[bytes]]]:
                     yielded = False
-                    for spec in self.parsers_by_topic.get((topic := record.topic()) or "") or ():
+                    for parser in self.parsers_map.get((topic := record.topic()) or "") or ():
                         try:
-                            # Support async parsers: await if result is awaitable
-                            result: object = spec["parser"](record)
-                            if inspect.isawaitable(result):
-                                result = await result
+                            result = await parser.aparse(record)
+
                             # Support async correlation extractors: await if result is awaitable
                             cid_or_awaitable = self.corr_from_record(record, result)
                             cid: bytes | None = (
                                 await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
                             )
-                            yield (result, spec["type"]), cid
+                            yield (result, parser.type), cid
                             yielded = True
                         except Exception as ex:
-                            logger.debug(
-                                f"Parser failed (topic={topic}, out={getattr(spec['type'], '__name__', spec['type'])}): {ex}"
-                            )
+                            if self.on_parser_error == "raise":
+                                raise
+                            if self.on_parser_error == "log":
+                                logger.error(
+                                    "Parser failed (topic=%s, out=%s): %s",
+                                    topic,
+                                    getattr(parser.type, "__name__", parser.type),
+                                    ex,
+                                    exc_info=ex,
+                                )
                     # Fallback: yield raw Message if no parser matched or all parsers failed
                     if not yielded:
                         cid_or_awaitable = self.corr_from_record(record, record)
@@ -446,13 +457,13 @@ class KafkaBaseClient(ABC):
                 except asyncio.CancelledError:
                     pass
 
-            if self.subscribed_topics:
+            if self.topics:
                 try:
                     consumer = self._consumer
 
                     def subscribe() -> None:
                         consumer.subscribe(
-                            sorted(self.subscribed_topics),
+                            sorted(self.topics),
                             on_assign=_on_assign,
                             on_revoke=_on_revoke,
                             on_lost=_on_lost,
@@ -471,7 +482,7 @@ class KafkaBaseClient(ABC):
         return (tp.topic, tp.partition)
 
     @abstractmethod
-    async def _on_record(self, record: Message, parsed: tuple[object, Type[object]], cid: Optional[bytes]) -> None: ...
+    async def _on_record(self, record: Message, parsed: tuple[T, Type[T]], cid: Optional[bytes]) -> None: ...
 
     @abstractmethod
     async def _on_stop_cleanup(self) -> None: ...
@@ -669,19 +680,18 @@ class KafkaBaseClient(ABC):
         return await self._consumer_executor.run(_poll)
 
     @property
-    def subscribed_topics(self) -> set[str]:
+    def topics(self) -> set[str]:
         subscribed_topics: set[str] = set()
         for ps in self.parsers:
             # Build topic index and subscription topics (ignore explicit partitioning)
-            for topic in ps["topics"]:
-                subscribed_topics.add(topic)
+            subscribed_topics.update(ps.topics)
         return subscribed_topics
 
     @property
-    def parsers_by_topic(self) -> dict[str, list[ParserSpec[object]]]:
-        parsers_by_topic: dict[str, list[ParserSpec[object]]] = {}
+    def parsers_map(self) -> dict[str, list[Parser[object]]]:
+        parsers_by_topic: dict[str, list[Parser[object]]] = {}
         for ps in self.parsers:
-            for topic in ps["topics"]:
+            for topic in ps.topics:
                 parsers_by_topic.setdefault(topic, []).append(ps)
         return parsers_by_topic
 

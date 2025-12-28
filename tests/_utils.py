@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Callable, Coroutine, Sequence
 
 from kafklient import ConsumerConfig, KafkaRPCServer, Message, Producer, ProducerConfig
+from kafklient.types.parser import Parser
 
 from ._config import KAFKA_BOOTSTRAP, TEST_TIMEOUT
 
@@ -131,7 +132,7 @@ def create_echo_rpc_server(
         server = KafkaRPCServer(
             consumer_config=make_consumer_config(server_group),
             producer_config=make_producer_config(),
-            parsers=[{"topics": [request_topic], "type": EchoRequest, "parser": parse_echo_request}],
+            parsers=[Parser[EchoRequest](topics=[request_topic], factory=parse_echo_request)],
             auto_create_topics=True,
         )
 
@@ -156,7 +157,7 @@ def create_json_echo_server(
         server = KafkaRPCServer(
             consumer_config=make_consumer_config(server_group),
             producer_config=make_producer_config(),
-            parsers=[{"topics": [request_topic], "type": JsonEchoRequest, "parser": parse_json_echo_request}],
+            parsers=[Parser[JsonEchoRequest](topics=[request_topic], factory=parse_json_echo_request)],
             auto_create_topics=True,
         )
 
