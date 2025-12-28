@@ -576,8 +576,9 @@ name = "kafklient"
 version = "0.3.1b1"
 source = { editable = "." }
 dependencies = [
-    { name = "beartype" },
     { name = "confluent-kafka" },
+    { name = "pydantic" },
+    { name = "types-confluent-kafka" },
 ]
 
 [package.optional-dependencies]
@@ -596,13 +597,14 @@ mcp = [
 
 [package.metadata]
 requires-dist = [
-    { name = "beartype", specifier = ">=0.22.9" },
     { name = "confluent-kafka", specifier = ">=2.12.0" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.14.1" },
     { name = "kafklient", extras = ["dev"], marker = "extra == 'all'" },
     { name = "kafklient", extras = ["mcp"], marker = "extra == 'all'" },
+    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.7" },
+    { name = "types-confluent-kafka", specifier = ">=1.4.0" },
 ]
 provides-extras = ["dev", "mcp", "all"]
 
@@ -1427,6 +1429,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6d/c1/933d30fd7a123ed981e2a1eedafceab63cb379db0402e438a13bc51bbb15/typer-0.20.1.tar.gz", hash = "sha256:68585eb1b01203689c4199bc440d6be616f0851e9f0eb41e4a778845c5a0fd5b", size = 105968, upload-time = "2025-12-19T16:48:56.302Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/52/1f2df7e7d1be3d65ddc2936d820d4a3d9777a54f4204f5ca46b8513eff77/typer-0.20.1-py3-none-any.whl", hash = "sha256:4b3bde918a67c8e03d861aa02deca90a95bbac572e71b1b9be56ff49affdb5a8", size = 47381, upload-time = "2025-12-19T16:48:53.679Z" },
+]
+
+[[package]]
+name = "types-confluent-kafka"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/04/b7b185ecb77b9f4eb393465323271c73db421e24177a0551c215318701d1/types_confluent_kafka-1.4.0.tar.gz", hash = "sha256:95c1e1325be480950e0f0dc6616ef7a72094b1f4947608343a17b14ce8b972b5", size = 22960, upload-time = "2025-11-02T20:53:12.476Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/32/c241c174bab31367a0dab68a450bf9b09ae3057c9bbcb9f740dbc04d988f/types_confluent_kafka-1.4.0-py3-none-any.whl", hash = "sha256:9db22207778bb1a05cb80faf3f364086aa2c7ee9a2cf3b89e1df1f56951105c1", size = 35683, upload-time = "2025-11-02T20:53:11.271Z" },
 ]
 
 [[package]]

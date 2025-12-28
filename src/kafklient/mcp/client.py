@@ -15,67 +15,12 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
 from kafklient.clients.listener import KafkaListener
+from kafklient.mcp._utils import REPLY_TOPIC_HEADER_KEY, SESSION_ID_HEADER_KEY, extract_header_bytes
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
 from kafklient.types.parser import Parser
 
 logger = logging.getLogger(__name__)
-REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
-SESSION_ID_HEADER_KEY = "x-session-id"
-
-
-def _extract_header_bytes(record: KafkaMessage, header_key: str) -> bytes | None:
-    try:
-        headers = record.headers() or []
-    except Exception:
-        headers = []
-    for k, v in headers:
-        if k.lower() != header_key.lower():
-            continue
-        if v is None:
-            return None
-        if isinstance(v, bytes):
-            return v
-        return str(v).encode("utf-8")
-    return None
-
-
-def _parse_value(raw: str) -> object:
-    lowered = raw.strip().lower()
-    if lowered in {"true", "false"}:
-        return lowered == "true"
-    if lowered in {"null", "none"}:
-        return None
-
-    # Try int/float
-    try:
-        if "." in raw:
-            return float(raw)
-        return int(raw)
-    except ValueError:
-        pass
-
-    # Try JSON (dict/list/strings/numbers)
-    if raw and raw[0] in {"{", "[", '"'}:
-        try:
-            return json.loads(raw)
-        except Exception:
-            pass
-
-    return raw
-
-
-def _parse_kv_items(items: list[str]) -> dict[str, object]:
-    out: dict[str, object] = {}
-    for item in items:
-        if "=" not in item:
-            raise ValueError(f"Invalid config item {item!r}. Expected KEY=VALUE.")
-        k, v = item.split("=", 1)
-        k = k.strip()
-        if not k:
-            raise ValueError(f"Invalid config item {item!r}. Key cannot be empty.")
-        out[k] = _parse_value(v.strip())
-    return out
 
 
 @asynccontextmanager
@@ -130,7 +75,7 @@ async def kafka_client_transport(
             async with read_stream_writer:
                 async for record in stream:
                     if session_id is not None:
-                        sid = _extract_header_bytes(record, SESSION_ID_HEADER_KEY)
+                        sid = extract_header_bytes(record, SESSION_ID_HEADER_KEY)
                         # In isolation mode, drop messages that do not belong to "this session".
                         if sid != session_id:
                             continue
@@ -148,9 +93,7 @@ async def kafka_client_transport(
                 async for session_message in write_stream_reader:
                     json_str: str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
                     # Attach reply-topic so the server knows which response topic to use for this client/session.
-                    headers: list[tuple[str, str | bytes | None]] = [
-                        (REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))
-                    ]
+                    headers: list[tuple[str, str | bytes]] = [(REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))]
                     if session_id is not None:
                         headers.append((SESSION_ID_HEADER_KEY, session_id))
                     await listener.produce(
@@ -184,7 +127,7 @@ async def run_client_async(
     # In session isolation mode, responses are filtered by per-bridge session_id.
     # This provides logical isolation even when using a shared response topic (e.g. mcp-responses).
     session_id: bytes | None = uuid4().hex.encode("utf-8") if isolate_session else None
-    logger.debug(f"Session ID: {session_id.decode('utf-8') if session_id else '<none>'}")
+    logger.debug(f"Session ID: {session_id.decode('utf-8', errors='replace') if session_id else '<none>'}")
 
     async with stdio_server() as (stdio_read, stdio_write):
         async with kafka_client_transport(
@@ -227,6 +170,43 @@ async def run_client_async(
 
                 tg.start_soon(forward_stdio_to_kafka)
                 tg.start_soon(forward_kafka_to_stdio)
+
+
+def _parse_kv_items(items: list[str]) -> dict[str, object]:
+    def _parse_value(raw: str) -> object:
+        lowered = raw.strip().lower()
+        if lowered in {"true", "false"}:
+            return lowered == "true"
+        if lowered in {"null", "none"}:
+            return None
+
+        # Try int/float
+        try:
+            if "." in raw:
+                return float(raw)
+            return int(raw)
+        except ValueError:
+            pass
+
+        # Try JSON (dict/list/strings/numbers)
+        if raw and raw[0] in {"{", "[", '"'}:
+            try:
+                return json.loads(raw)
+            except Exception:
+                pass
+
+        return raw
+
+    out: dict[str, object] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"Invalid config item {item!r}. Expected KEY=VALUE.")
+        k, v = item.split("=", 1)
+        k = k.strip()
+        if not k:
+            raise ValueError(f"Invalid config item {item!r}. Key cannot be empty.")
+        out[k] = _parse_value(v.strip())
+    return out
 
 
 def main(argv: list[str] | None = None) -> None:

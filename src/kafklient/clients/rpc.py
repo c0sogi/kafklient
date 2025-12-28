@@ -64,7 +64,7 @@ class KafkaRPC(KafkaBaseClient):
         req_headers_reply_to: Optional[list[str]],
         *,
         req_key: Optional[bytes] = None,
-        req_headers: Optional[list[tuple[str, str | bytes | None]]] = None,
+        req_headers: Optional[list[tuple[str, str | bytes]]] = None,
         res_timeout: float = 30.0,
         res_expect_type: Optional[Type[T]] = None,
         correlation_id: Optional[bytes] = None,
@@ -135,7 +135,7 @@ class KafkaRPC(KafkaBaseClient):
         topic: str,
         value: bytes,
         key: Optional[bytes],
-        headers: list[tuple[str, str | bytes | None]] | None,
+        headers: list[tuple[str, str | bytes]] | None,
     ) -> None:
         loop = asyncio.get_running_loop()
         delivery_future: asyncio.Future[Message | None] = loop.create_future()
@@ -319,15 +319,12 @@ class KafkaRPCServer(KafkaBaseClient):
         reply_topics: list[str] = []
         headers = record.headers() or []
         for key, value in headers:
-            if key.lower() == self.reply_topic_header_key.lower():
-                if value is None:
-                    continue
-                try:
-                    if isinstance(value, bytes):
-                        value = value.decode("utf-8")
-                    reply_topics.append(value)
-                except Exception:
-                    pass
+            if key.lower() == self.reply_topic_header_key.lower() and value is not None:  # pyright: ignore[reportUnnecessaryComparison]
+                reply_topics.append(
+                    value.decode("utf-8", errors="replace")
+                    if isinstance(value, bytes)  # pyright: ignore[reportUnnecessaryIsInstance]
+                    else value
+                )
         return reply_topics
 
     async def _produce_response(
@@ -352,7 +349,7 @@ class KafkaRPCServer(KafkaBaseClient):
 
         # Build key and headers based on propagate_corr_to setting
         msg_key: Optional[bytes] = None
-        msg_headers: list[tuple[str, str | bytes | None]] = []
+        msg_headers: list[tuple[str, str | bytes]] = []
 
         if correlation_id:
             if self.propagate_corr_to == "key" or self.propagate_corr_to == "both":

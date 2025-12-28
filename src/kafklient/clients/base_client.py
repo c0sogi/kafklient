@@ -620,7 +620,7 @@ class KafkaBaseClient(ABC):
         callback: Callable[[KafkaError | None, Message], None] | None = None,
         on_delivery: Callable[[KafkaError | None, Message], None] | None = None,
         timestamp: int = 0,
-        headers: dict[str, str | bytes | None] | list[tuple[str, str | bytes | None]] | None = None,
+        headers: dict[str, str | bytes] | list[tuple[str, str | bytes]] | None = None,
         flush: bool = False,
         flush_timeout: float | None = None,
     ) -> None:

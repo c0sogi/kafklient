@@ -17,6 +17,7 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
 from kafklient.clients.listener import KafkaListener
+from kafklient.mcp._utils import extract_header_bytes, extract_session_id
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
 from kafklient.types.parser import Parser
@@ -24,49 +25,6 @@ from kafklient.types.parser import Parser
 logger = logging.getLogger(__name__)
 REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
 SESSION_ID_HEADER_KEY = "x-session-id"
-
-
-def _extract_reply_topic(record: KafkaMessage, *, fallback: str) -> str:
-    """Extract reply-topic from Kafka headers (falls back to `fallback` if missing)."""
-    try:
-        headers = record.headers() or []
-    except Exception:
-        headers = []
-    for k, v in headers:
-        if k.lower() != REPLY_TOPIC_HEADER_KEY.lower():
-            continue
-        if v is None:
-            continue
-        try:
-            if isinstance(v, bytes):
-                return v.decode("utf-8")
-            return str(v)
-        except Exception:
-            continue
-    return fallback
-
-
-def _extract_session_id(record: KafkaMessage) -> bytes | None:
-    try:
-        headers = record.headers() or []
-    except Exception:
-        headers = []
-    for k, v in headers:
-        if k.lower() != SESSION_ID_HEADER_KEY.lower():
-            continue
-        if v is None:
-            return None
-        if isinstance(v, bytes):
-            return v
-        return str(v).encode("utf-8")
-    return None
-
-
-def _session_key_from_bytes(b: bytes) -> str:
-    try:
-        return b.decode("utf-8")
-    except Exception:
-        return b.hex()
 
 
 @dataclass
@@ -273,7 +231,7 @@ async def run_server_async(
                         async with write_stream_reader:
                             async for session_message in write_stream_reader:
                                 json_str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
-                                headers: list[tuple[str, str | bytes | None]] | None = (
+                                headers: list[tuple[str, str | bytes]] | None = (
                                     [(SESSION_ID_HEADER_KEY, session.session_id)]
                                     if session.session_id is not None
                                     else None
@@ -291,56 +249,63 @@ async def run_server_async(
             try:
                 async with anyio.create_task_group() as tg:
                     async for record in stream:
-                        msg = JSONRPCMessage.model_validate_json(record.value() or b"")
-                        reply_topic = _extract_reply_topic(record, fallback=producer_topic)
-                        session_id = _extract_session_id(record)
-                        # NOTE:
-                        # If session_id (e.g. a bridge instance UUID) and reply_topic (string) share the same
-                        # namespace, collisions are possible. For example, if isolate_session=False and a client
-                        # uses a reply_topic string that happens to match another client's session_id string,
-                        # the sessions could be merged. We prevent this by separating the key namespaces.
-                        session_key = (
-                            f"sid:{_session_key_from_bytes(session_id)}"
-                            if session_id is not None
-                            else f"topic:{reply_topic}"
-                        )
-                        # If reply_topic differs from producer_topic, it means "dedicated reply topic" (client opted in).
-                        # If it's the same, we use the shared reply topic but rely on session-id headers to avoid mixing.
-                        target_topic = reply_topic if reply_topic != producer_topic else producer_topic
-                        session = await ensure_session(
-                            session_key=session_key,
-                            target_topic=target_topic,
-                            session_id=session_id,
-                            tg=tg,
-                        )
                         try:
-                            await session.read_stream_writer.send(SessionMessage(msg))
-                        except anyio.ClosedResourceError:
-                            # Sending into a closed session (e.g. bridge already exited) raises ClosedResourceError.
-                            # Clean up the session so this does not take down the whole server, and retry once.
-                            logger.info(
-                                f"Session stream closed (session_key={session_key!r}); dropping session and retrying"
-                            )
-                            sessions.pop(session_key, None)
-                            try:
-                                await session.read_stream_writer.aclose()
-                            except Exception:
-                                pass
+                            msg = JSONRPCMessage.model_validate_json(record.value() or b"")
+                            if reply_topic_bytes := extract_header_bytes(record, REPLY_TOPIC_HEADER_KEY):
+                                reply_topic: str = reply_topic_bytes.decode("utf-8", errors="replace")
+                            else:
+                                reply_topic = producer_topic
 
-                            # Retry once (in case messages keep coming for the same key)
+                            session_id: bytes | None = extract_session_id(record)
+                            # NOTE:
+                            # If session_id (e.g. a bridge instance UUID) and reply_topic (string) share the same
+                            # namespace, collisions are possible. For example, if isolate_session=False and a client
+                            # uses a reply_topic string that happens to match another client's session_id string,
+                            # the sessions could be merged. We prevent this by separating the key namespaces.
+                            if session_id is not None:
+                                session_key: str = f"sid:{session_id.decode('utf-8', errors='replace')}"
+                            else:
+                                session_key = f"topic:{reply_topic}"
+
+                            # If reply_topic differs from producer_topic, it means "dedicated reply topic" (client opted in).
+                            # If it's the same, we use the shared reply topic but rely on session-id headers to avoid mixing.
+                            target_topic: str = reply_topic if reply_topic != producer_topic else producer_topic
+                            session = await ensure_session(
+                                session_key=session_key,
+                                target_topic=target_topic,
+                                session_id=session_id,
+                                tg=tg,
+                            )
                             try:
-                                session = await ensure_session(
-                                    session_key=session_key,
-                                    target_topic=target_topic,
-                                    session_id=session_id,
-                                    tg=tg,
-                                )
                                 await session.read_stream_writer.send(SessionMessage(msg))
                             except anyio.ClosedResourceError:
-                                # If it's still closed right after recreation, drop this message.
-                                logger.warning(
-                                    f"Session stream closed again (session_key={session_key!r}); dropping message"
+                                # Sending into a closed session (e.g. bridge already exited) raises ClosedResourceError.
+                                # Clean up the session so this does not take down the whole server, and retry once.
+                                logger.info(
+                                    f"Session stream closed (session_key={session_key!r}); dropping session and retrying"
                                 )
+                                sessions.pop(session_key, None)
+                                try:
+                                    await session.read_stream_writer.aclose()
+                                except Exception:
+                                    pass
+
+                                # Retry once (in case messages keep coming for the same key)
+                                try:
+                                    session = await ensure_session(
+                                        session_key=session_key,
+                                        target_topic=target_topic,
+                                        session_id=session_id,
+                                        tg=tg,
+                                    )
+                                    await session.read_stream_writer.send(SessionMessage(msg))
+                                except anyio.ClosedResourceError:
+                                    # If it's still closed right after recreation, drop this message.
+                                    logger.warning(
+                                        f"Session stream closed again (session_key={session_key!r}); dropping message"
+                                    )
+                        except Exception:
+                            logger.exception("Error processing message")
             finally:
                 try:
                     await listener.stop()

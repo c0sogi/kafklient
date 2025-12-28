@@ -129,7 +129,7 @@ class TestBaseClientProduce(unittest.IsolatedAsyncioTestCase):
         try:
             await client.start()
 
-            test_headers: list[tuple[str, str | bytes | None]] = [
+            test_headers: list[tuple[str, str | bytes]] = [
                 ("x-request-id", b"req-123"),
                 ("x-trace-id", "trace-456"),
             ]
