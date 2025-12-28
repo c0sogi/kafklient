@@ -21,9 +21,8 @@ class Parser(BaseModel, Generic[T_Co]):
     def default_parser(self) -> Factory[T_Co]:
         if self.type is Message:
             return lambda record: record  # pyright: ignore[reportReturnType]
-        return lambda record: TypeAdapter[T_Co](
-            self.type, config=ConfigDict(arbitrary_types_allowed=True)
-        ).validate_python(record.value() or b"")
+        adapter: TypeAdapter[T_Co] = make_adapter(self.type)
+        return lambda record: adapter.validate_python(record.value() or b"")
 
     @cached_property
     def type(self) -> Type[T_Co]:
@@ -47,6 +46,12 @@ class Parser(BaseModel, Generic[T_Co]):
 
     def __str__(self) -> str:
         return f"Parser(topics={self.topics}, type={self.type.__name__})"
+
+
+def make_adapter(tp: Type[T]) -> TypeAdapter[T]:
+    if isinstance(tp, type) and issubclass(tp, BaseModel):  # pyright: ignore[reportUnnecessaryIsInstance]
+        return TypeAdapter[T](tp)
+    return TypeAdapter[T](tp, config=ConfigDict(arbitrary_types_allowed=True))
 
 
 if __name__ == "__main__":

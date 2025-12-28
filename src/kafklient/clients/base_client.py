@@ -404,7 +404,9 @@ class KafkaBaseClient(ABC):
                             yield (result, parser.type), cid
                             yielded = True
                         except Exception as ex:
-                            exc_info = f"Parser failed ({topic=}, out={getattr(parser.type, "__name__", parser.type)}): {ex}"
+                            exc_info = (
+                                f"Parser failed ({topic=}, out={getattr(parser.type, '__name__', parser.type)}): {ex}"
+                            )
                     if not yielded:
                         if exc_info:
                             match self.on_parser_error:
