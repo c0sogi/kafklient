@@ -1,50 +1,271 @@
 kafklient
 =========
 
-Async Kafka helpers that wrap confluent_kafka with typed listeners and RPC utilities.
+Async Kafka utilities built on `confluent-kafka` (librdkafka).
 
-What's inside
--------------
-- `KafkaListener`: subscribe to topics and stream parsed objects.
-- `KafkaRPC`: request/response helper using correlation IDs over Kafka.
-- MCP over Kafka (optional): run an MCP server over Kafka + provide a stdio bridge (`kafklient-mcp-client`) so any MCP stdio client can connect.
-- Group-managed subscriptions only (subscribe-based). Manual assign is removed.
+This library wraps the synchronous `Consumer`/`Producer` with dedicated thread executors so Kafka operations do not block
+the event loop, and provides typed streams and RPC utilities via `Parser[T]`.
 
-Requirements
-------------
-- Python >= 3.12
-- Kafka cluster reachable from your app
-- confluent-kafka >= 2.6.0
+## What's inside
 
-Install
--------
+- **`KafkaListener`**: Subscribe to topics and stream parsed objects as `TypeStream[T]`.
+- **`KafkaRPC`**: Send requests and await responses matched by correlation id.
+- **`KafkaRPCServer`**: Consume request topics and produce responses to reply topics specified in headers.
+- **MCP over Kafka (optional)**: Run MCP (JSON-RPC) over Kafka topics + a stdio bridge (`kafklient-mcp-client`).
+
+> This library supports **consumer-group subscribe mode only**. (Manual assign is intentionally not supported.)
+
+## Requirements
+
+- Python **>= 3.12**
+- A reachable Kafka broker
+- `confluent-kafka` **>= 2.12.0**
+
+## Install
+
 ```bash
 pip install kafklient
 ```
 
-MCP (Model Context Protocol) over Kafka (optional)
--------------------------------------------------
-If you want to expose tools/resources/prompts to MCP clients over Kafka, install the optional extra:
+Optional extras:
+
+```bash
+# MCP server/bridge support
+pip install "kafklient[mcp]"
+
+# Dev tools (pyright/ruff)
+pip install "kafklient[all]"
+```
+
+## Local Kafka for development (optional)
+
+This repository includes a single-node Kafka `docker-compose.yml` for local testing.
+
+```bash
+docker compose up -d
+```
+
+Default bootstrap server: `localhost:9092`.
+
+## Core concepts
+
+### Consumer group (`group.id`)
+
+- **Same `group.id`**: competing consumers / load balancing (each record is delivered to one member in the group).
+- **Different `group.id`**: each instance receives the full stream (broadcast-style consumption).
+- **Important**: do not share a `group.id` between different roles (e.g. RPC clients vs RPC servers).
+
+### Start-from-latest behavior (`seek_to_end_on_assign`)
+
+With the default `seek_to_end_on_assign=True`, the consumer seeks to the end when partitions are assigned.
+This focuses processing on messages produced after the client becomes ready and reduces accidental reprocessing of old data.
+
+To read from older offsets:
+
+- `seek_to_end_on_assign=False`
+- optionally set `consumer_config["auto.offset.reset"] = "earliest"`
+
+### `Parser[T]`
+
+`Parser[T]` declares which topics to parse and what type to parse into.
+
+- **Recommended**: provide a `factory` for JSON/custom binary payloads.
+- `factory` can be sync or async; the input is a `Message`.
+
+## Examples
+
+### KafkaListener: consume as a typed stream
+
+This example parses JSON into a `Hello` dataclass and consumes a `TypeStream[Hello]`.
+
+```python
+import asyncio
+import json
+from dataclasses import dataclass
+
+from kafklient import ConsumerConfig, KafkaListener, Message, Parser, ProducerConfig
+
+
+@dataclass(frozen=True, slots=True)
+class Hello:
+    message: str
+    count: int
+
+
+def parse_hello(rec: Message) -> Hello:
+    raw = rec.value() or b"{}"
+    data = json.loads(raw.decode("utf-8"))
+    return Hello(
+        message=str(data.get("message", "")),
+        count=int(data.get("count", 0)),
+    )
+
+
+async def main() -> None:
+    topic = "hello-events"
+
+    consumer_config: ConsumerConfig = {
+        "bootstrap.servers": "localhost:9092",
+        "group.id": "hello-listener",
+        "auto.offset.reset": "latest",
+    }
+    producer_config: ProducerConfig = {"bootstrap.servers": "localhost:9092"}
+
+    async with KafkaListener(
+        parsers=[Parser[Hello](topics=[topic], factory=parse_hello)],
+        consumer_config=consumer_config,
+        producer_config=producer_config,
+        auto_create_topics=True,
+    ) as listener:
+        stream = await listener.subscribe(Hello)
+
+        # Demo only: produce and consume in the same process
+        await listener.produce(
+            topic,
+            json.dumps({"message": "hi", "count": 1}).encode("utf-8"),
+            flush=True,
+        )
+
+        async def receive_one() -> Hello:
+            async for item in stream:
+                return item
+            raise RuntimeError("stream stopped before receiving a message")
+
+        msg = await asyncio.wait_for(receive_one(), timeout=5.0)
+        print(msg)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### KafkaRPC + KafkaRPCServer: request/response
+
+RPC follows these rules:
+
+- **Request topic**: consumed by `KafkaRPCServer` (share the same `group.id` across servers to load-balance).
+- **Reply topic**: consumed by `KafkaRPC` (clients typically should use a unique `group.id`).
+- **Reply routing**: passed via one or more `x-reply-topic` headers on the request message.
+- **Correlation matching**: by default uses the message key (or the `x-corr-id` header).
+
+```python
+import asyncio
+from dataclasses import dataclass
+
+from kafklient import ConsumerConfig, KafkaRPC, KafkaRPCServer, Message, Parser, ProducerConfig
+
+
+@dataclass(frozen=True, slots=True)
+class EchoRequest:
+    data: bytes
+
+
+def parse_echo_request(msg: Message) -> EchoRequest:
+    return EchoRequest(data=msg.value() or b"")
+
+
+def parse_bytes(msg: Message) -> bytes:
+    return msg.value() or b""
+
+
+async def run_server(*, ready: asyncio.Event, stop: asyncio.Event) -> None:
+    request_topic = "rpc-requests"
+
+    server_consumer_config: ConsumerConfig = {
+        "bootstrap.servers": "localhost:9092",
+        "group.id": "rpc-server",
+        "auto.offset.reset": "latest",
+    }
+    server_producer_config: ProducerConfig = {"bootstrap.servers": "localhost:9092"}
+
+    server = KafkaRPCServer(
+        parsers=[Parser[EchoRequest](topics=[request_topic], factory=parse_echo_request)],
+        consumer_config=server_consumer_config,
+        producer_config=server_producer_config,
+        auto_create_topics=True,
+    )
+
+    @server.handler(EchoRequest)
+    async def echo(req: EchoRequest, message: Message) -> bytes:  # pyright: ignore[reportUnusedFunction]
+        return req.data
+
+    await server.start()
+    ready.set()
+    try:
+        await stop.wait()
+    finally:
+        await server.stop()
+
+
+async def main() -> None:
+    request_topic = "rpc-requests"
+    reply_topic = "rpc-replies"
+
+    server_ready = asyncio.Event()
+    server_stop = asyncio.Event()
+    server_task = asyncio.create_task(run_server(ready=server_ready, stop=server_stop))
+
+    rpc_consumer_config: ConsumerConfig = {
+        "bootstrap.servers": "localhost:9092",
+        "group.id": "rpc-client-1",
+        "auto.offset.reset": "latest",
+    }
+    rpc_producer_config: ProducerConfig = {"bootstrap.servers": "localhost:9092"}
+
+    rpc = KafkaRPC(
+        parsers=[Parser[bytes](topics=[reply_topic], factory=parse_bytes)],
+        consumer_config=rpc_consumer_config,
+        producer_config=rpc_producer_config,
+        auto_create_topics=True,
+    )
+
+    try:
+        await server_ready.wait()
+        await rpc.start()
+
+        res = await rpc.request(
+            req_topic=request_topic,
+            req_value=b"ping",
+            req_headers_reply_to=[reply_topic],
+            res_timeout=5.0,
+            res_expect_type=bytes,
+        )
+        print(res)
+    finally:
+        await rpc.stop()
+        server_stop.set()
+        await server_task
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Automatic topic creation
+
+All clients (`KafkaListener`/`KafkaRPC`/`KafkaRPCServer`) can create topics in one of two ways:
+
+- `auto_create_topics=True`: create topics referenced by `parsers` on start (before subscribing).
+- Manual call: `await client.create_topics("a", "b", ...)`
+
+Options:
+
+- `topic_num_partitions` (default: 1)
+- `topic_replication_factor` (default: 1)
+
+> Internally this uses `AdminClient` and requires broker permissions.
+
+## MCP over Kafka (optional)
+
+You can run MCP (JSON-RPC) over Kafka topics and connect any stdio-based MCP client via a bridge.
+
+### Install
 
 ```bash
 pip install "kafklient[mcp]"
 ```
 
-Quickstart (requires a reachable Kafka broker):
-
-```bash
-# 1) Start YOUR MCP server that speaks MCP(JSON-RPC) over Kafka
-#    (example below: my_mcp_server.py)
-uv run python my_mcp_server.py
-
-# 2) Start a stdio <-> Kafka bridge for MCP stdio clients (LangChain, etc.)
-uv run kafklient-mcp-client --bootstrap-servers localhost:9092
-```
-
-Example: custom MCP server over Kafka
-------------------------------------
-
-Create `my_mcp_server.py`:
+### Server example (`FastMCP` + `run_server`)
 
 ```python
 import logging
@@ -63,197 +284,49 @@ def echo(message: str) -> str:
     return f"Echo: {message}"
 
 
-@mcp.tool()
-def add(a: int, b: int) -> int:
-    return a + b
-
-
 if __name__ == "__main__":
     run_server(
         mcp,
         bootstrap_servers="localhost:9092",
         consumer_topic="mcp-requests",
         producer_topic="mcp-responses",
+        consumer_group_id="mcp-server",
+        auto_create_topics=True,
+        # Default: multi_session=True (session isolation mode)
+        multi_session=True,
         show_banner=False,
         log_level="info",
     )
 ```
 
-Notes:
-- The **server <-> bridge** communication goes through Kafka topics (`mcp-requests` / `mcp-responses` by default).
-- The **client <-> bridge** communication is stdio (JSON-RPC over stdin/stdout), so avoid printing to stdout in the bridge process.
+### stdio <-> Kafka bridge (`kafklient-mcp-client`)
 
-Core concepts
--------------
-- Group-managed subscribe: Consumers must have a non-empty `group_id` to join a consumer group. Kafka partitions are assigned and rebalanced by the coordinator.
-- group_id strategy:
-  - Same `group_id` among instances → competing consumers (load-balancing, each record processed once by the group).
-  - Different `group_id` among instances → each instance receives the full stream (broadcast-style consumption).
-  - Never share `group_id` between logically different roles (e.g., RPC clients vs RPC servers).
-
-ParserSpec
-----------
-You declare which topics a client parses and how to parse them.
-
-```python
-from kafklient import Message, ParserSpec
-
-
-def parse_json(rec: Message) -> dict[str, object]:
-    import json
-
-    return json.loads(rec.value() or b"{}")
-
-
-spec: ParserSpec[dict[str, object]] = {
-    "topics": ["events"],
-    "type": dict[str, object],
-    "parser": parse_json,
-}
-
+```bash
+uv run kafklient-mcp-client --bootstrap-servers localhost:9092
 ```
 
-KafkaListener quickstart
-------------------------
-```python
-import asyncio
+Useful flags:
 
-from kafklient import KafkaListener
+- `--consumer-topic`: topic to read responses/notifications from (default: `mcp-responses`)
+- `--producer-topic`: topic to write requests to (default: `mcp-requests`)
+- `--isolate-session` / `--no-isolate-session`: isolate sessions by filtering responses using `x-session-id` (default: true)
 
+## Development
 
-async def main() -> None:
-    async with KafkaListener(
-        parsers=[
-            {
-                "topics": ["my-topic"],
-                "type": dict[str, object],
-                "parser": lambda r: {"topic": r.topic(), "value": (r.value() or b"").decode("utf-8")},
-            }
-        ],
-        consumer_factory={
-            "bootstrap.servers": "127.0.0.1:9092",
-            "auto.offset.reset": "latest",
-        },
-    ) as listener:
-        stream = await listener.subscribe(dict[str, object])
-        async for item in stream:
-            print("got:", item)
+Lint/type-check:
 
-
-asyncio.run(main())
-
+```bash
+uv run ruff check .
+uv run pyright
 ```
 
-KafkaRPC quickstart
--------------------
-```python
-import asyncio
+If Kafka is running (e.g. after `docker compose up -d`), run the tests:
 
-from kafklient import KafkaRPC
-
-
-async def main() -> None:
-    async with KafkaRPC(
-        parsers=[{"topics": ["my-topic"], "type": bytes, "parser": lambda r: r.value() or b""}],
-        producer_factory={"bootstrap.servers": "127.0.0.1:9092"},
-        consumer_factory={
-            "bootstrap.servers": "127.0.0.1:9092",
-            "auto.offset.reset": "latest",
-        },
-    ) as rpc:
-        res = await rpc.request(
-            req_topic="request",
-            req_value=b"hello",
-            # Optionally direct server to respond to specific topics
-            req_headers_reply_to=["reply"],
-            res_expect_type=bytes,
-        )
-        print("response:", res)
-
-
-asyncio.run(main())
-
+```bash
+uv run kafklient-test
 ```
 
-RPC server pattern
-------------------
-Typical layout: servers consume from `request` and produce to reply topics passed in headers.
+## License
 
-Guidelines:
-- Server instances should share the same `group_id` to load-balance requests.
-- Servers must NOT share `group_id` with clients.
-- Server reads request, extracts `x-reply-topic` headers, and produces the response to that topic. If multiple reply topics are present, produce to each (or choose policy).
-
-Group_id guidance
------------------
-- Listener
-  - Same group_id → scale-out (each record processed once by the group).
-  - Different group_id → broadcast (each listener gets all records).
-- RPC server (responders)
-  - Same group_id among servers → load-balancing for requests.
-  - Different group_id among servers → all servers handle each request (usually wrong for RPC).
-- RPC client (requesters)
-  - Each client should have a unique group_id to avoid competing on replies.
-  - Do not reuse server group_id.
-
-Offsets & auto commit
----------------------
-- `auto_offset_reset` defaults are set on consumer factories in examples to `latest`.
-
-Correlation IDs
----------------
-- `KafkaBaseClient` extracts correlation IDs from headers (e.g. `x-corr-id`) or from the key when present.
-- `KafkaRPC.request` can propagate the correlation ID in key and/or a header you choose (default header: `x-corr-id`).
-
-Thread-based async implementation
----------------------------------
-This library uses sync `Consumer` and `Producer` from confluent-kafka, wrapped with dedicated thread executors (`DedicatedThreadExecutor`) to provide a non-blocking async API. This approach:
-- Avoids blocking the event loop during Kafka operations
-- Uses separate dedicated threads for consumer and producer operations
-- Provides stable, production-ready Kafka client behavior
-- Works with all existing confluent-kafka features and configurations
-
-Auto topic creation
--------------------
-Both `KafkaListener` and `KafkaRPC` can automatically create topics if they don't exist. Enable this feature with `auto_create_topics=True`:
-
-```python
-async with KafkaListener(
-    parsers=[{"topics": ["my-topic"], "type": bytes, "parser": lambda r: r.value() or b""}],
-    consumer_factory={"bootstrap.servers": "127.0.0.1:9092"},
-    auto_create_topics=True,
-    topic_num_partitions=3,      # default: 1
-    topic_replication_factor=1,  # default: 1
-) as listener:
-    # Topics are created before subscribing
-    stream = await listener.subscribe(bytes)
-    async for item in stream:
-        print(item)
-
-```
-
-Options:
-- `auto_create_topics: bool = False` - Enable automatic topic creation
-- `topic_num_partitions: int = 1` - Number of partitions for auto-created topics
-- `topic_replication_factor: int = 1` - Replication factor for auto-created topics
-
-Note: This uses AdminClient internally and requires appropriate broker permissions.
-
-Production notes
-----------------
-- Always set explicit `group_id` in your provided `consumer_factory`.
-- Use dedicated topics for requests and for replies. Avoid sending replies to the request topic.
-- Isolate roles with different `group_id`s (clients vs servers).
-- Ensure idempotency in servers when necessary.
-
-API reference (selected)
-------------------------
-- `KafkaListener(parsers: Iterable[ParserSpec[object]], ...)`
-  - `subscribe(tp: Type[T], *, queue_maxsize: int = 0, fresh: bool = False) -> TypeStream[T]`
-- `KafkaRPC(parsers: Iterable[ParserSpec[object]], ...)`
-  - `request(req_topic: str, req_value: bytes, *, req_key: bytes | None = None, req_headers: list[tuple[str, str | bytes]] | None = None, req_headers_reply_to: list[str] | None = None, res_timeout: float = 30.0, res_expect_type: Type[T] | None = None, correlation_id: bytes | None = None, propagate_corr_to: str = "both", correlation_header_key: str = "x-corr-id") -> T`
-
-License
--------
 MIT
 

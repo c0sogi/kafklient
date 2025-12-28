@@ -92,7 +92,7 @@ async def kafka_client_transport(
     session_id: bytes | None = None,
 ) -> AsyncIterator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]]]:
     """
-    Client Transport: Server와 반대로 동작합니다.
+    Client transport: behaves in the opposite direction of the server.
     - Writes to Request Topic
     - Reads from Response Topic
     """
@@ -112,8 +112,9 @@ async def kafka_client_transport(
     )
 
     # Best-effort topic creation:
-    # - 응답 토픽(consumer_topic)은 구독 전에 존재해야 안정적입니다(브로커 auto-create 비활성 환경 고려).
-    # - 요청 토픽(producer_topic)은 produce 전에 존재해야 할 수 있습니다.
+    # - The response topic (consumer_topic) should exist before subscribing for stability
+    #   (consider brokers with auto-create disabled).
+    # - The request topic (producer_topic) may need to exist before producing.
     if auto_create_topics:
         await listener.create_topics(consumer_topic, producer_topic)
 
@@ -130,7 +131,7 @@ async def kafka_client_transport(
                 async for record in stream:
                     if session_id is not None:
                         sid = _extract_header_bytes(record, SESSION_ID_HEADER_KEY)
-                        # 격리 모드에서는 "내 세션"이 아닌 메시지는 드롭합니다.
+                        # In isolation mode, drop messages that do not belong to "this session".
                         if sid != session_id:
                             continue
                     msg = JSONRPCMessage.model_validate_json(record.value() or b"")
@@ -146,7 +147,7 @@ async def kafka_client_transport(
             async with write_stream_reader:
                 async for session_message in write_stream_reader:
                     json_str: str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
-                    # 세션 격리를 위해, 서버가 "어느 응답 토픽으로 보내야 하는지"를 알 수 있도록 reply-topic 헤더를 부착합니다.
+                    # Attach reply-topic so the server knows which response topic to use for this client/session.
                     headers: list[tuple[str, str | bytes | None]] = [
                         (REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))
                     ]
@@ -180,8 +181,8 @@ async def run_client_async(
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
 ) -> None:
-    # 세션 격리 모드에서는 브릿지 인스턴스별 session_id로 응답을 필터링합니다.
-    # => 토픽을 인스턴스별로 새로 만들지 않아도(공용 mcp-responses) 논리적 격리가 가능.
+    # In session isolation mode, responses are filtered by per-bridge session_id.
+    # This provides logical isolation even when using a shared response topic (e.g. mcp-responses).
     session_id: bytes | None = uuid4().hex.encode("utf-8") if isolate_session else None
     logger.debug(f"Session ID: {session_id.decode('utf-8') if session_id else '<none>'}")
 
@@ -232,7 +233,7 @@ def main(argv: list[str] | None = None) -> None:
     """
     kafklient-mcp-client
 
-    LangChain 등 stdio 기반 MCP 클라이언트와 Kafka 기반 MCP 서버 사이를 이어주는 브릿지 프로세스입니다.
+    A bridge process between stdio-based MCP clients (e.g. LangChain) and Kafka-based MCP servers.
     """
     parser = ArgumentParser(prog="kafklient-mcp-client")
     parser.add_argument(

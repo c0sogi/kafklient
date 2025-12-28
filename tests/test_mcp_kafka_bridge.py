@@ -11,12 +11,13 @@ from tests._config import KAFKA_BOOTSTRAP, TEST_TIMEOUT
 class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
     async def test_mcp_list_tools_and_call_tool(self) -> None:
         """
-        MCP over Kafka E2E 테스트.
+        MCP over Kafka E2E test.
 
-        구성:
-        - (in-process) kafklient.mcp.server.run_server_async : Kafka(요청/응답 토픽)로 MCP 서버 실행
-        - (subprocess) uv run kafklient-mcp-client : stdio <-> Kafka 브릿지
-        - (in-process) mcp.client.session.ClientSession : stdio로 브릿지에 접속하여 initialize/list_tools/call_tool 검증
+        Setup:
+        - (in-process) kafklient.mcp.server.run_server_async: runs MCP server over Kafka (request/response topics)
+        - (subprocess) uv run kafklient-mcp-client: stdio <-> Kafka bridge
+        - (in-process) mcp.client.session.ClientSession: connects to the bridge over stdio and validates
+          initialize/list_tools/call_tool
         """
         try:
             from fastmcp import FastMCP
@@ -32,11 +33,11 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
         req_topic = f"mcp-requests-{suffix}"
         res_topic = f"mcp-responses-{suffix}"
 
-        # 서버(요청 consumer)와 클라이언트(응답 consumer)는 group_id를 분리해야 함
+        # Server (request consumer) and client (response consumer) must use different group.id values.
         server_group_id = f"mcp-server-{suffix}"
         client_group_id = f"mcp-client-{suffix}"
 
-        # 테스트가 initialize를 시도하기 전에 Kafka consumer subscription(assignment)이 끝났음을 보장
+        # Ensure the Kafka consumer subscription (assignment) is ready before the test calls initialize().
         server_ready = asyncio.Event()
 
         mcp = FastMCP("Kafka MCP Server (test)")
@@ -66,7 +67,7 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
         try:
             await asyncio.wait_for(server_ready.wait(), timeout=TEST_TIMEOUT)
 
-            # stdio 클라이언트는 브릿지 프로세스를 띄워서 통신한다(uv 기반).
+            # The stdio client communicates by spawning the bridge process (via uv).
             bridge = StdioServerParameters(
                 command="uv",
                 args=[
@@ -101,14 +102,14 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                     result = await session.call_tool("add", {"a": 2, "b": 3})
                     self.assertFalse(result.isError, f"tool call failed: {result!r}")
 
-                    # FastMCP는 보통 결과를 text content로 내려준다. (structuredContent는 옵션)
+                    # FastMCP typically returns results as text content. (structuredContent is optional.)
                     text_parts: list[str] = []
                     for block in result.content:
                         if getattr(block, "type", None) == "text":
                             text_parts.append(getattr(block, "text", ""))
                     joined = " ".join(text_parts).strip()
 
-                    # 결과 형태가 바뀌어도 깨지지 않게: text에 5가 있거나 structuredContent가 있으면 통과
+                    # Be resilient to format changes: pass if text contains "5" or structuredContent is present.
                     self.assertTrue(
                         ("5" in joined) or (result.structuredContent is not None),
                         f"unexpected tool result: text={joined!r}, structured={result.structuredContent!r}",
@@ -123,12 +124,12 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
 
     async def test_mcp_multi_client_session_isolation(self) -> None:
         """
-        동일한 요청 토픽을 공유하는 2개 브릿지(=2개 MCP 클라이언트 세션)가 동시에 접속하더라도,
-        각 세션의 initialize/response가 섞이지 않음을 검증합니다.
+        Verify that even when two bridges (= two MCP client sessions) share the same request topic concurrently,
+        initialize/responses do not get mixed across sessions.
 
-        전제:
-        - 브릿지는 요청 produce 시 x-reply-topic 헤더로 자신의 응답 토픽을 싣는다.
-        - 서버는 reply-topic(세션 키)별로 별도의 MCP ServerSession을 생성하여 응답/알림을 격리한다.
+        Assumptions:
+        - The bridge attaches its response topic via the x-reply-topic header when producing requests.
+        - The server creates a separate MCP ServerSession per reply-topic (session key) to isolate responses/notifications.
         """
         try:
             from fastmcp import FastMCP
@@ -142,7 +143,7 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
 
         suffix = uuid.uuid4().hex[:8]
         req_topic = f"mcp-requests-shared-{suffix}"
-        # 응답 토픽은 1개로 공유하되, x-session-id로 브릿지에서 필터링하여 세션 격리를 보장한다.
+        # Share a single response topic but filter by x-session-id in the bridge to ensure session isolation.
         res_topic = f"mcp-responses-shared-{suffix}"
 
         server_group_id = f"mcp-server-{suffix}"
@@ -229,13 +230,13 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                         read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
                     ) as session_b,
                 ):
-                    # 동시에 initialize -> JSON-RPC id 충돌 가능성이 높아, 세션 격리가 깨지면 여기서 흔히 터진다.
+                    # Initialize concurrently: if isolation is broken, JSON-RPC id collisions often show up here.
                     await asyncio.wait_for(
                         asyncio.gather(session_a.initialize(), session_b.initialize()),
                         timeout=TEST_TIMEOUT,
                     )
 
-                    # 도구 목록도 동시에
+                    # List tools concurrently as well
                     tools_a, tools_b = await asyncio.wait_for(
                         asyncio.gather(session_a.list_tools(), session_b.list_tools()),
                         timeout=TEST_TIMEOUT,
@@ -245,7 +246,7 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("add", tool_names_a)
                     self.assertIn("add", tool_names_b)
 
-                    # 동시에 tool call (id 충돌/응답 혼선 방지 검증)
+                    # Call the tool concurrently (validates no id collision / response mixing)
                     result_a, result_b = await asyncio.wait_for(
                         asyncio.gather(
                             session_a.call_tool("add", {"a": 1, "b": 2}),

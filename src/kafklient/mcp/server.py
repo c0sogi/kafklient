@@ -27,7 +27,7 @@ SESSION_ID_HEADER_KEY = "x-session-id"
 
 
 def _extract_reply_topic(record: KafkaMessage, *, fallback: str) -> str:
-    """Kafka headers에서 reply-topic을 추출합니다(없으면 fallback)."""
+    """Extract reply-topic from Kafka headers (falls back to `fallback` if missing)."""
     try:
         headers = record.headers() or []
     except Exception:
@@ -175,7 +175,7 @@ async def run_server_async(
         mcp_server = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
         async with mcp._lifespan_manager():  # pyright: ignore[reportPrivateUsage]
             # ---------------------------
-            # 단일 세션(레거시) 모드
+            # Single-session (legacy) mode
             # ---------------------------
             if not multi_session:
                 async with kafka_server_transport(
@@ -203,12 +203,12 @@ async def run_server_async(
                 return
 
             # ---------------------------
-            # 멀티 세션(세션 격리) 모드
+            # Multi-session (session isolation) mode
             # ---------------------------
-            # 핵심:
-            # - 클라이언트가 요청 메시지에 x-reply-topic 헤더로 "내 응답 토픽"을 싣는다.
-            # - 서버는 reply-topic(=세션 키)별로 독립적인 MCP ServerSession을 생성/유지한다.
-            # - 각 세션의 write_stream은 해당 reply-topic으로만 produce => 응답/알림 혼선 방지.
+            # Core idea:
+            # - The client attaches its "reply topic" via the x-reply-topic header on requests.
+            # - The server creates and maintains an independent MCP ServerSession per reply-topic (session key).
+            # - Each session's write_stream produces only to that reply-topic to avoid mixing responses/notifications.
 
             experimental_capabilities = get_task_capabilities()
             init_opts = mcp_server.create_initialization_options(
@@ -295,17 +295,17 @@ async def run_server_async(
                         reply_topic = _extract_reply_topic(record, fallback=producer_topic)
                         session_id = _extract_session_id(record)
                         # NOTE:
-                        # session_id(=브릿지 인스턴스 UUID 등)와 reply_topic(문자열)이 같은 네임스페이스에서
-                        # 섞이면 충돌할 수 있습니다. 예: isolate_session=False인 클라이언트가 reply_topic을
-                        # 우연히 다른 클라이언트의 session_id 문자열과 동일하게 쓰면 같은 세션으로 합쳐짐.
-                        # 따라서 키 네임스페이스를 분리하여 충돌을 원천 차단합니다.
+                        # If session_id (e.g. a bridge instance UUID) and reply_topic (string) share the same
+                        # namespace, collisions are possible. For example, if isolate_session=False and a client
+                        # uses a reply_topic string that happens to match another client's session_id string,
+                        # the sessions could be merged. We prevent this by separating the key namespaces.
                         session_key = (
                             f"sid:{_session_key_from_bytes(session_id)}"
                             if session_id is not None
                             else f"topic:{reply_topic}"
                         )
-                        # reply-topic이 producer_topic과 다르면 "전용 토픽 응답"을 의미(클라이언트가 명시적으로 분리한 경우)
-                        # 같으면 공용 응답 토픽을 쓰되 session-id 헤더로 필터링하여 혼선 방지.
+                        # If reply_topic differs from producer_topic, it means "dedicated reply topic" (client opted in).
+                        # If it's the same, we use the shared reply topic but rely on session-id headers to avoid mixing.
                         target_topic = reply_topic if reply_topic != producer_topic else producer_topic
                         session = await ensure_session(
                             session_key=session_key,
@@ -316,8 +316,8 @@ async def run_server_async(
                         try:
                             await session.read_stream_writer.send(SessionMessage(msg))
                         except anyio.ClosedResourceError:
-                            # 세션이 이미 종료된 상태(브릿지 종료 등)에서 추가 메시지를 보내면 ClosedResourceError가 발생합니다.
-                            # 이 예외가 서버 전체를 죽이지 않도록 세션을 정리하고, 필요 시 1회 재생성 후 재시도합니다.
+                            # Sending into a closed session (e.g. bridge already exited) raises ClosedResourceError.
+                            # Clean up the session so this does not take down the whole server, and retry once.
                             logger.info(
                                 f"Session stream closed (session_key={session_key!r}); dropping session and retrying"
                             )
@@ -327,7 +327,7 @@ async def run_server_async(
                             except Exception:
                                 pass
 
-                            # 재시도(1회): 같은 키로 계속 요청이 들어오는 경우를 대비
+                            # Retry once (in case messages keep coming for the same key)
                             try:
                                 session = await ensure_session(
                                     session_key=session_key,
@@ -337,7 +337,7 @@ async def run_server_async(
                                 )
                                 await session.read_stream_writer.send(SessionMessage(msg))
                             except anyio.ClosedResourceError:
-                                # 재생성 직후에도 닫혀있다면 해당 메시지는 드롭
+                                # If it's still closed right after recreation, drop this message.
                                 logger.warning(
                                     f"Session stream closed again (session_key={session_key!r}); dropping message"
                                 )
