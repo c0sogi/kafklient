@@ -29,7 +29,7 @@ from ..types.backend import (
     Consumer,
     KafkaError,
     Message,
-    NewTopic,  # pyright: ignore[reportPrivateImportUsage]
+    NewTopic,
     Producer,
     TopicPartition,
 )
@@ -519,7 +519,7 @@ class KafkaBaseClient(ABC):
 
                 # Wait for creation to complete
                 created: list[str] = []
-                for topic, future in admin.create_topics(new_topics).items():  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+                for topic, future in admin.create_topics(new_topics).items():
                     try:
                         future.result(timeout=timeout)
                         created.append(topic)
@@ -592,7 +592,7 @@ class KafkaBaseClient(ABC):
                 # Delete all topics
                 # Wait for deletion to complete
                 deleted: list[str] = []
-                for topic, future in admin.delete_topics(topics_to_delete, operation_timeout=int(timeout)).items():  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+                for topic, future in admin.delete_topics(topics_to_delete, operation_timeout=int(timeout)).items():
                     try:
                         future.result(timeout=timeout)
                         deleted.append(topic)

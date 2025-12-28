@@ -10,14 +10,14 @@ from .types import (
     KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
-    ClusterMetadata,  # pyright: ignore[reportPrivateImportUsage]
+    ClusterMetadata,
     CommonConfig,
     Consumer,
     ConsumerConfig,
     KafkaError,
     KafkaException,
     Message,
-    NewTopic,  # pyright: ignore[reportPrivateImportUsage]
+    NewTopic,
     Parser,
     Producer,
     ProducerConfig,

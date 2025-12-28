@@ -2,12 +2,12 @@ from .backend import (
     KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
-    ClusterMetadata,  # pyright: ignore[reportPrivateImportUsage]
+    ClusterMetadata,
     Consumer,
     KafkaError,
     KafkaException,
     Message,
-    NewTopic,  # pyright: ignore[reportPrivateImportUsage]
+    NewTopic,
     Producer,
     TopicPartition,
 )

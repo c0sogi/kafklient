@@ -21,7 +21,7 @@ from confluent_kafka import (
     Producer,
     TopicPartition,
 )
-from confluent_kafka.admin import AdminClient, ClusterMetadata, NewTopic  # pyright: ignore[reportPrivateImportUsage]
+from confluent_kafka.admin import AdminClient, ClusterMetadata, NewTopic
 
 
 def get_error_code(name: str) -> int | None:

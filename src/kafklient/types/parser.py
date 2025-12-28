@@ -22,7 +22,24 @@ class Parser(BaseModel, Generic[T_Co]):
         if self.type is Message:
             return lambda record: record  # pyright: ignore[reportReturnType]
         adapter: TypeAdapter[T_Co] = make_adapter(self.type)
-        return lambda record: adapter.validate_python(record.value() or b"")
+
+        # NOTE:
+        # Kafka record.value() is typically bytes. For Pydantic models (and many other types),
+        # JSON bytes should be validated via validate_json(), not validate_python(bytes).
+        # To keep backward compatibility for binary payloads, we try validate_json() first
+        # (only when the expected output type is not "bytes-like"), then fall back to validate_python().
+        def _parse(record: Message) -> T_Co:
+            raw: bytes = record.value() or b""
+
+            # If the user expects raw bytes, do not try to interpret them as JSON.
+            if self.type is not bytes:
+                try:
+                    return adapter.validate_json(raw)
+                except Exception:
+                    pass
+            return adapter.validate_python(raw)
+
+        return _parse
 
     @cached_property
     def type(self) -> Type[T_Co]:
