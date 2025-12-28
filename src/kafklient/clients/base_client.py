@@ -390,7 +390,8 @@ class KafkaBaseClient(ABC):
                 async def _parse_record(
                     record: Message,
                 ) -> AsyncIterable[tuple[tuple[object, Type[object]], Optional[bytes]]]:
-                    yielded = False
+                    yielded: bool = False
+                    exc_info: Optional[str] = None
                     for parser in self.parsers_map.get((topic := record.topic()) or "") or ():
                         try:
                             result = await parser.aparse(record)
@@ -403,21 +404,18 @@ class KafkaBaseClient(ABC):
                             yield (result, parser.type), cid
                             yielded = True
                         except Exception as ex:
-                            if self.on_parser_error == "raise":
-                                raise
-                            if self.on_parser_error == "log":
-                                logger.error(
-                                    "Parser failed (topic=%s, out=%s): %s",
-                                    topic,
-                                    getattr(parser.type, "__name__", parser.type),
-                                    ex,
-                                    exc_info=ex,
-                                )
-                    # Fallback: yield raw Message if no parser matched or all parsers failed
+                            exc_info = f"Parser failed ({topic=}, out={getattr(parser.type, "__name__", parser.type)}): {ex}"
                     if not yielded:
-                        cid_or_awaitable = self.corr_from_record(record, record)
-                        cid = await cid_or_awaitable if inspect.isawaitable(cid_or_awaitable) else cid_or_awaitable
-                        yield (record, Message), cid
+                        if exc_info:
+                            match self.on_parser_error:
+                                case "raise":
+                                    raise Exception(exc_info)
+                                case "log":
+                                    logger.error(exc_info)
+                                case _:
+                                    pass
+                        else:
+                            logger.warning(f"No parser matched ({topic=}): {record.value()}")
 
                 try:
                     while not self._stop_event.is_set():
