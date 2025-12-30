@@ -578,6 +578,7 @@ source = { editable = "." }
 dependencies = [
     { name = "confluent-kafka" },
     { name = "pydantic" },
+    { name = "typer" },
     { name = "types-confluent-kafka" },
 ]
 
@@ -604,6 +605,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.7" },
+    { name = "typer", specifier = ">=0.20.1" },
     { name = "types-confluent-kafka", specifier = ">=1.4.0" },
 ]
 provides-extras = ["dev", "mcp", "all"]
