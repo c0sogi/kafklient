@@ -1,17 +1,10 @@
 import asyncio
-import importlib
-import json
 import logging
 import os
-import runpy
 import sys
-from pathlib import Path
 from typing import TypeGuard
 
 import typer
-from pydantic import TypeAdapter
-
-from kafklient.types import ConsumerConfig, ProducerConfig
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -101,6 +94,7 @@ def mcp_client(
     ),
 ) -> None:
     """Run the MCP stdio-to-Kafka bridge (client side)."""
+    from kafklient.mcp._utils import parse_kafka_config
     from kafklient.mcp.client import run_client_async
 
     # MCP stdio transport requires stdout to remain protocol-only.
@@ -231,13 +225,37 @@ def mcp_server(
     ),
 ) -> None:
     """Run a FastMCP server over Kafka (stdio transport bridged to Kafka)."""
-    # Lazy imports to keep `kafklient` CLI usable without `kafklient[mcp]` unless needed.
-    try:
-        from fastmcp import FastMCP
 
-        from kafklient.mcp.server import run_server
-    except Exception as e:  # pragma: no cover
-        raise typer.BadParameter(f"Failed to import MCP dependencies: {e}", param_hint="--mcp") from e
+    from kafklient.mcp._utils import load_object_from_spec, parse_kafka_config
+    from kafklient.mcp.server import Server, run_server
+
+    def load_mcp_object_from_spec(
+        spec: str,
+        *,
+        default_object_name: str | None,
+        param_hint: str | None,
+    ) -> Server:
+
+        def is_server_instance(obj: object) -> TypeGuard[Server]:
+            return isinstance(obj, Server)
+
+        maybe_mcp: object = load_object_from_spec(
+            spec,
+            default_object_name=default_object_name,
+            param_hint=param_hint,
+        )
+        if is_server_instance(maybe_mcp):
+            return maybe_mcp
+        elif callable(maybe_mcp):
+            try:
+                maybe_mcp = maybe_mcp()
+            except Exception as e:
+                raise typer.BadParameter(f"Failed to call MCP factory: {e}", param_hint=param_hint) from e
+            if not is_server_instance(maybe_mcp):
+                raise typer.BadParameter("Factory result is not a FastMCP or MCP instance.", param_hint=param_hint)
+            return maybe_mcp
+        else:
+            raise typer.BadParameter("Must be a FastMCP instance (or a zero-arg factory).", param_hint=param_hint)
 
     # Match mcp_client behavior: honor CLI log level for Python logging too.
     # (FastMCP logging may still be adjusted separately via temporary_log_level in run_server.)
@@ -248,26 +266,6 @@ def mcp_server(
         stream=sys.stderr,
         force=True,
     )
-
-    loaded = _load_object_from_spec(mcp, default_object_name="mcp", param_hint="--mcp")
-
-    def _is_fastmcp_like(obj: object) -> TypeGuard[FastMCP]:
-        return isinstance(obj, FastMCP)
-
-    mcp_obj: FastMCP
-    if _is_fastmcp_like(loaded):
-        mcp_obj = loaded
-    elif callable(loaded):
-        try:
-            created = loaded()
-        except Exception as e:
-            raise typer.BadParameter(f"Failed to call MCP factory: {e}", param_hint="--mcp") from e
-        if not _is_fastmcp_like(created):
-            raise typer.BadParameter("Factory result is not a FastMCP instance.", param_hint="--mcp")
-        mcp_obj = created
-    else:
-        raise typer.BadParameter("Must be a FastMCP instance (or a zero-arg factory).", param_hint="--mcp")
-
     parsed_consumer_config, parsed_producer_config = parse_kafka_config(
         consumer_config=consumer_config,
         producer_config=producer_config,
@@ -277,7 +275,7 @@ def mcp_server(
         default_producer_config={},
     )
     run_server(
-        mcp=mcp_obj,
+        mcp=load_mcp_object_from_spec(mcp, default_object_name="mcp", param_hint="--mcp"),
         bootstrap_servers=bootstrap_servers,
         consumer_topic=consumer_topic,
         producer_topic=producer_topic,
@@ -290,149 +288,3 @@ def mcp_server(
         log_level=log_level,
         multi_session=multi_session,
     )
-
-
-def parse_kafka_config(
-    consumer_config: list[str],
-    producer_config: list[str],
-    consumer_config_json: str | None,
-    producer_config_json: str | None,
-    *,
-    default_consumer_config: ConsumerConfig,
-    default_producer_config: ProducerConfig,
-) -> tuple[ConsumerConfig, ProducerConfig]:
-
-    def _parse_kv_items(items: list[str]) -> dict[str, object]:
-        def _parse_value(raw: str) -> object:
-            lowered = raw.strip().lower()
-            if lowered in {"true", "false"}:
-                return lowered == "true"
-            if lowered in {"null", "none"}:
-                return None
-
-            # Try int/float
-            try:
-                if "." in raw:
-                    return float(raw)
-                return int(raw)
-            except ValueError:
-                pass
-
-            # Try JSON (dict/list/strings/numbers)
-            if raw and raw[0] in {"{", "[", '"'}:
-                try:
-                    return json.loads(raw)
-                except Exception:
-                    pass
-
-            return raw
-
-        out: dict[str, object] = {}
-        for item in items:
-            if "=" not in item:
-                raise ValueError(f"Invalid config item {item!r}. Expected KEY=VALUE.")
-            k, v = item.split("=", 1)
-            k = k.strip()
-            if not k:
-                raise ValueError(f"Invalid config item {item!r}. Key cannot be empty.")
-            out[k] = _parse_value(v.strip())
-        return out
-
-    if consumer_config_json:
-        final_consumer_config = default_consumer_config | TypeAdapter(ConsumerConfig).validate_json(
-            consumer_config_json
-        )
-    elif consumer_config:
-        final_consumer_config = default_consumer_config | TypeAdapter(ConsumerConfig).validate_python(
-            _parse_kv_items(consumer_config)
-        )
-    else:
-        final_consumer_config = default_consumer_config
-
-    if producer_config_json:
-        final_producer_config = default_producer_config | TypeAdapter(ProducerConfig).validate_json(
-            producer_config_json
-        )
-    elif producer_config:
-        final_producer_config = default_producer_config | TypeAdapter(ProducerConfig).validate_python(
-            _parse_kv_items(producer_config)
-        )
-    else:
-        final_producer_config = default_producer_config
-
-    return final_consumer_config, final_producer_config
-
-
-def _load_object_from_spec(
-    spec: str,
-    *,
-    default_object_name: str | None,
-    param_hint: str | None,
-) -> object:
-    """
-    spec formats:
-    - "some.module:obj" (or "some.module:obj.attr")
-    - "path/to/file.py:obj" (or "path/to/file.py:obj.attr")
-
-    If ":" is omitted, we assume ":{default_object_name}".
-    """
-    raw = spec.strip()
-    if not raw:
-        raise typer.BadParameter("Must not be empty.", param_hint=param_hint)
-
-    if ":" in raw:
-        target_raw, obj_path_raw = raw.split(":", 1)
-    elif default_object_name:
-        target_raw, obj_path_raw = raw, default_object_name
-    else:
-        raise typer.BadParameter("Must specify a module name or file path.", param_hint=param_hint)
-
-    target = target_raw.strip()
-    obj_path = obj_path_raw.strip()
-    if not target:
-        raise typer.BadParameter("Module name or file path is required.", param_hint=param_hint)
-    if not obj_path:
-        raise typer.BadParameter("Object path is required (e.g. module:obj).", param_hint=param_hint)
-
-    attrs = [p for p in obj_path.split(".") if p]
-    if not attrs:
-        raise typer.BadParameter("Invalid object path.", param_hint=param_hint)
-
-    # File path mode
-    target_path = Path(target)
-    if target_path.suffix.lower() == ".py" or target_path.exists():
-        try:
-            ns = runpy.run_path(str(target_path))
-        except Exception as e:
-            raise typer.BadParameter(f"Failed to load file: {e}", param_hint=param_hint) from e
-
-        if attrs[0] not in ns:
-            raise typer.BadParameter(
-                f"Object {attrs[0]!r} not found in file.",
-                param_hint=param_hint,
-            )
-        obj: object = ns[attrs[0]]
-        for attr in attrs[1:]:
-            try:
-                obj = getattr(obj, attr)
-            except Exception as e:
-                raise typer.BadParameter(f"Failed to access attribute {attr!r}: {e}", param_hint=param_hint) from e
-        return obj
-
-    # Module mode
-    try:
-        mod = importlib.import_module(target)
-    except Exception as e:
-        raise typer.BadParameter(f"Failed to import module: {e}", param_hint=param_hint) from e
-
-    try:
-        obj = getattr(mod, attrs[0])
-    except Exception as e:
-        raise typer.BadParameter(f"Object {attrs[0]!r} not found in module: {e}", param_hint=param_hint) from e
-
-    for attr in attrs[1:]:
-        try:
-            obj = getattr(obj, attr)
-        except Exception as e:
-            raise typer.BadParameter(f"Failed to access attribute {attr!r}: {e}", param_hint=param_hint) from e
-    return obj

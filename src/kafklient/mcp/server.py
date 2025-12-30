@@ -1,27 +1,34 @@
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
 import anyio
+import fastmcp
+import mcp.server
 from anyio import EndOfStream
 from anyio.lowlevel import checkpoint
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from fastmcp import FastMCP
 from fastmcp.server.tasks.capabilities import get_task_capabilities
-from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.logging import temporary_log_level
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
+from rich.align import Align
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from kafklient.clients.listener import KafkaListener
 from kafklient.mcp._utils import extract_header_bytes, extract_session_id
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
 from kafklient.types.parser import Parser
+
+Server = mcp.server.FastMCP | fastmcp.FastMCP
 
 logger = logging.getLogger(__name__)
 REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
@@ -101,8 +108,53 @@ async def kafka_server_transport(
         yield read_stream, write_stream
 
 
+def log_server_banner(server: Server) -> None:
+    """Creates and logs a formatted banner with server information and logo.
+    Reference: https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/cli.py
+
+    Args:
+        transport: The transport protocol being used
+        server_name: Optional server name to display
+        host: Host address (for HTTP transports)
+        port: Port number (for HTTP transports)
+        path: Server path (for HTTP transports)
+    """
+
+    # Create the main title
+    title_text = Text(f"{type(server)} Server", style="bold blue")
+
+    # Create the information table
+    info_table = Table.grid(padding=(0, 1))
+    info_table.add_column(style="bold", justify="center")  # Emoji column
+    info_table.add_column(style="cyan", justify="left")  # Label column
+    info_table.add_column(style="dim", justify="left")  # Value column
+
+    info_table.add_row("🖥", "Server name:", Text(server.name + "\n", style="bold blue"))
+    info_table.add_row("📦", "Transport:", "STDIO over KAFKA")
+
+    # Create panel with logo, title, and information using Group
+    panel_content = Group(
+        Align.center(title_text),
+        "",
+        "",
+        Align.center(info_table),
+    )
+
+    panel = Panel(
+        panel_content,
+        border_style="dim",
+        padding=(1, 4),
+        # expand=False,
+        width=80,  # Set max width for the panel
+    )
+
+    console = Console(stderr=True)
+    # Center the panel itself
+    console.print(Group("\n", Align.center(panel), "\n"))
+
+
 async def run_server_async(
-    mcp: FastMCP,
+    mcp: Server,
     *,
     bootstrap_servers: str = "localhost:9092",
     consumer_topic: str = "mcp-requests",
@@ -125,14 +177,17 @@ async def run_server_async(
     """
     # Display server banner
     if show_banner:
-        log_server_banner(
-            server=mcp,
-            transport="stdio",
-        )
+        log_server_banner(server=mcp)
 
     with temporary_log_level(log_level):
         mcp_server = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
-        async with mcp._lifespan_manager():  # pyright: ignore[reportPrivateUsage]
+
+        if isinstance(mcp, fastmcp.FastMCP):
+            context_manager = mcp._lifespan_manager()  # pyright: ignore[reportPrivateUsage]
+        else:
+            context_manager = nullcontext()
+
+        async with context_manager:
             # ---------------------------
             # Single-session (legacy) mode
             # ---------------------------
@@ -350,7 +405,7 @@ async def run_server_async(
 
 
 def run_server(
-    mcp: FastMCP,
+    mcp: Server,
     *,
     bootstrap_servers: str = "localhost:9092",
     consumer_topic: str = "mcp-requests",
