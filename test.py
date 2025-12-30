@@ -1,7 +1,8 @@
-# from kafklient import Message, Parser
+from fastmcp import FastMCP
 
-# parser = Parser[str | None](topics=["test"])
-# msg = Message(topic="test", value=b"test")
-# parsed = parser.parse(msg)
-# print(parsed)
-# #
+mcp = FastMCP("Test MCP")
+
+
+@mcp.tool()
+def add(a: int, b: int) -> int:
+    return a + b

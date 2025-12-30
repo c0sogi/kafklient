@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 
 import anyio
+from anyio import EndOfStream
 from anyio.lowlevel import checkpoint
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from fastmcp import FastMCP
@@ -197,6 +198,21 @@ async def run_server_async(
 
             sessions: dict[str, _McpKafkaSession] = {}
             created_topics: set[str] = set()
+            cancelled_exc = anyio.get_cancelled_exc_class()
+
+            async def close_session(*, session_key: str, session: _McpKafkaSession) -> None:
+                """Best-effort cleanup for a session so future sends don't block forever."""
+                sessions.pop(session_key, None)
+                for s in (
+                    session.read_stream_writer,
+                    session.read_stream,
+                    session.write_stream,
+                    session.write_stream_reader,
+                ):
+                    try:
+                        await s.aclose()
+                    except Exception:
+                        pass
 
             async def ensure_session(
                 *, session_key: str, target_topic: str, session_id: bytes | None, tg: Any
@@ -222,9 +238,27 @@ async def run_server_async(
                     write_stream_reader=write_stream_reader,
                 )
                 sessions[session_key] = session
+                logger.info(
+                    "Created MCP session (session_key=%r, target_topic=%r, session_id=%r)",
+                    session_key,
+                    target_topic,
+                    session_id.decode("utf-8", errors="replace") if session_id else None,
+                )
 
                 async def run_mcp_session() -> None:
-                    await mcp_server.run(read_stream, write_stream, init_opts)
+                    try:
+                        await mcp_server.run(read_stream, write_stream, init_opts)
+                    except cancelled_exc:
+                        # Treat per-session cancellation as a normal shutdown path.
+                        await checkpoint()
+                    except BaseException:
+                        logger.exception("MCP session crashed (session_key=%r)", session_key)
+                    finally:
+                        # If the MCP session exits (client disconnected, shutdown, crash),
+                        # ensure the streams are closed. Otherwise, a later send() to a
+                        # zero-buffer memory stream can block forever and stall the server.
+                        await close_session(session_key=session_key, session=session)
+                        logger.info("Closed MCP session (session_key=%r)", session_key)
 
                 async def pump_session_to_kafka() -> None:
                     try:
@@ -239,6 +273,12 @@ async def run_server_async(
                                 await listener.produce(session.target_topic, json_str.encode("utf-8"), headers=headers)
                     except anyio.ClosedResourceError:
                         await checkpoint()
+                    except EndOfStream:
+                        await checkpoint()
+                    except cancelled_exc:
+                        await checkpoint()
+                    except BaseException:
+                        logger.exception("pump_session_to_kafka crashed (session_key=%r)", session_key)
 
                 tg.start_soon(run_mcp_session)
                 tg.start_soon(pump_session_to_kafka)
@@ -284,11 +324,7 @@ async def run_server_async(
                                 logger.info(
                                     f"Session stream closed (session_key={session_key!r}); dropping session and retrying"
                                 )
-                                sessions.pop(session_key, None)
-                                try:
-                                    await session.read_stream_writer.aclose()
-                                except Exception:
-                                    pass
+                                await close_session(session_key=session_key, session=session)
 
                                 # Retry once (in case messages keep coming for the same key)
                                 try:

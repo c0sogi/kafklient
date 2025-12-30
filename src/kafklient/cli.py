@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import runpy
+import sys
 from pathlib import Path
 from typing import TypeGuard
 
@@ -15,11 +16,12 @@ from kafklient.types import ConsumerConfig, ProducerConfig
 app = typer.Typer(no_args_is_help=True)
 
 
-@app.command(no_args_is_help=True)
+@app.command()
 def mcp_client(
     bootstrap_servers: str = typer.Option(
         "localhost:9092",
         "--bootstrap-servers",
+        "-b",
         envvar="KAFKLIENT_MCP_BOOTSTRAP",
         help="Kafka bootstrap servers",
         show_default=True,
@@ -27,6 +29,7 @@ def mcp_client(
     consumer_topic: str | None = typer.Option(
         None,
         "--consumer-topic",
+        "-c",
         help=(
             "Kafka topic to read responses/notifications from. "
             "If omitted, uses $KAFKLIENT_MCP_CONSUMER_TOPIC or 'mcp-responses'. "
@@ -36,6 +39,7 @@ def mcp_client(
     producer_topic: str = typer.Option(
         "mcp-requests",
         "--producer-topic",
+        "-p",
         envvar="KAFKLIENT_MCP_PRODUCER_TOPIC",
         help="Kafka topic to write requests to",
         show_default=True,
@@ -43,6 +47,7 @@ def mcp_client(
     consumer_group_id: str | None = typer.Option(
         None,
         "--consumer-group-id",
+        "-g",
         envvar="KAFKLIENT_MCP_CONSUMER_GROUP_ID",
         help="Kafka consumer group id for the response consumer (default: auto-generated)",
         show_default=False,
@@ -89,6 +94,7 @@ def mcp_client(
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
+        "-l",
         envvar="KAFKLIENT_MCP_LOG_LEVEL",
         help="Logging level",
         show_default=True,
@@ -97,7 +103,13 @@ def mcp_client(
     """Run the MCP stdio-to-Kafka bridge (client side)."""
     from kafklient.mcp.client import run_client_async
 
-    logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
+    # MCP stdio transport requires stdout to remain protocol-only.
+    # Force Python logging to stderr, even if something configured logging earlier.
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        stream=sys.stderr,
+        force=True,
+    )
 
     parsed_consumer_config, parsed_producer_config = parse_kafka_config(
         consumer_config=consumer_config,
@@ -126,14 +138,14 @@ def mcp_client(
 
 @app.command(no_args_is_help=True)
 def mcp_server(
-    mcp: str = typer.Option(
+    mcp: str = typer.Argument(
         ...,
-        "--mcp",
         help=("FastMCP object spec. e.g. mypkg.myserver:mcp or ./myserver.py:mcp (':' is optional)"),
     ),
     bootstrap_servers: str = typer.Option(
         "localhost:9092",
         "--bootstrap-servers",
+        "-b",
         envvar="KAFKLIENT_MCP_BOOTSTRAP",
         help="Kafka bootstrap servers",
         show_default=True,
@@ -141,18 +153,21 @@ def mcp_server(
     consumer_topic: str = typer.Option(
         "mcp-requests",
         "--consumer-topic",
+        "-c",
         help="Kafka topic to read requests from",
         show_default=True,
     ),
     producer_topic: str = typer.Option(
         "mcp-responses",
         "--producer-topic",
+        "-p",
         help="Kafka topic to write responses/notifications to",
         show_default=True,
     ),
     consumer_group_id: str | None = typer.Option(
         None,
         "--consumer-group-id",
+        "-g",
         help="Kafka consumer group id for the request consumer (default: auto-generated)",
         show_default=False,
     ),
@@ -165,6 +180,7 @@ def mcp_server(
     assignment_timeout_s: float = typer.Option(
         5.0,
         "--assignment-timeout-s",
+        "-t",
         help="Consumer assignment timeout seconds",
         show_default=True,
     ),
@@ -203,6 +219,7 @@ def mcp_server(
     log_level: str | None = typer.Option(
         None,
         "--log-level",
+        "-l",
         help="Log level for the server (overrides default temporarily)",
         show_default=False,
     ),
@@ -222,7 +239,15 @@ def mcp_server(
     except Exception as e:  # pragma: no cover
         raise typer.BadParameter(f"Failed to import MCP dependencies: {e}", param_hint="--mcp") from e
 
-    logging.basicConfig(level=logging.INFO)
+    # Match mcp_client behavior: honor CLI log level for Python logging too.
+    # (FastMCP logging may still be adjusted separately via temporary_log_level in run_server.)
+    base_level_name = (log_level or "INFO").upper()
+    # Keep stdout clean when used under stdio-based transports.
+    logging.basicConfig(
+        level=getattr(logging, base_level_name, logging.INFO),
+        stream=sys.stderr,
+        force=True,
+    )
 
     loaded = _load_object_from_spec(mcp, default_object_name="mcp", param_hint="--mcp")
 

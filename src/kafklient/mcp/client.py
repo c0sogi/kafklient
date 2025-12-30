@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 from uuid import uuid4
 
 import anyio
@@ -137,6 +137,8 @@ async def run_client_async(
             assignment_timeout_s=assignment_timeout_s,
             session_id=session_id,
         ) as (kafka_read, kafka_write):
+            shutdown_requested = anyio.Event()
+
             # NOTE:
             # The stdio client expects the spawned process to exit when stdin is closed.
             # If we keep the bridge alive after stdin EOF,
@@ -145,6 +147,13 @@ async def run_client_async(
             # Therefore, we cancel the task group as soon as either direction completes.
             async with anyio.create_task_group() as tg:
 
+                def _extract_method(msg: SessionMessage) -> str | None:
+                    # We avoid depending on the exact JSONRPCMessage variant classes
+                    # (request/notification/response) and just inspect the dumped payload.
+                    payload: dict[str, Any] = msg.message.model_dump(by_alias=True, exclude_none=True)
+                    method = payload.get("method")
+                    return method if isinstance(method, str) else None
+
                 async def forward_stdio_to_kafka() -> None:
                     try:
                         async with stdio_read, kafka_write:
@@ -152,6 +161,14 @@ async def run_client_async(
                                 if isinstance(message, Exception):
                                     logger.warning(f"Received exception from stdio: {message}", exc_info=message)
                                     continue
+                                method = _extract_method(message)
+                                if method in {"shutdown", "exit"}:
+                                    # Inspector's Disconnect typically triggers shutdown/exit.
+                                    # If we continue emitting stdout after the browser side is gone,
+                                    # the inspector proxy can crash ("Not connected").
+                                    shutdown_requested.set()
+                                    await kafka_write.send(message)
+                                    return
                                 await kafka_write.send(message)
                     finally:
                         tg.cancel_scope.cancel()
@@ -160,7 +177,12 @@ async def run_client_async(
                     try:
                         async with kafka_read, stdio_write:
                             async for message in kafka_read:
-                                await stdio_write.send(message)
+                                if shutdown_requested.is_set():
+                                    return
+                                try:
+                                    await stdio_write.send(message)
+                                except (anyio.ClosedResourceError, anyio.BrokenResourceError, BrokenPipeError):
+                                    return
                     finally:
                         tg.cancel_scope.cancel()
 
