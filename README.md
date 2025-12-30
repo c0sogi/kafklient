@@ -11,7 +11,7 @@ the event loop, and provides typed streams and RPC utilities via `Parser[T]`.
 - **`KafkaListener`**: Subscribe to topics and stream parsed objects as `TypeStream[T]`.
 - **`KafkaRPC`**: Send requests and await responses matched by correlation id.
 - **`KafkaRPCServer`**: Consume request topics and produce responses to reply topics specified in headers.
-- **MCP over Kafka (optional)**: Run MCP (JSON-RPC) over Kafka topics + a stdio bridge (`kafklient-mcp-client`).
+- **MCP over Kafka (optional)**: Run MCP (JSON-RPC) over Kafka topics + stdio bridges via CLI (`kafklient mcp-client` / `kafklient mcp-server`).
 
 > This library supports **consumer-group subscribe mode only**. (Manual assign is intentionally not supported.)
 
@@ -299,10 +299,28 @@ if __name__ == "__main__":
     )
 ```
 
-### stdio <-> Kafka bridge (`kafklient-mcp-client`)
+### CLI: server (`kafklient mcp-server`)
+
+The CLI can load a `FastMCP` instance from a module or a Python file and run it over Kafka.
+
+Supported `--mcp` formats:
+
+- Module: `mypkg.myserver:mcp` (or `mypkg.myserver:mcp.some_attr`)
+- File: `./myserver.py:mcp` (or `./myserver.py:mcp.some_attr`)
+- If `:` is omitted, it defaults to `:mcp` (e.g. `mypkg.myserver` == `mypkg.myserver:mcp`)
 
 ```bash
-uv run kafklient-mcp-client --bootstrap-servers localhost:9092
+# Module-based
+kafklient mcp-server --mcp mypkg.myserver:mcp --bootstrap-servers localhost:9092
+
+# File-based
+kafklient mcp-server --mcp ./myserver.py:mcp --bootstrap-servers localhost:9092
+```
+
+### CLI: stdio <-> Kafka bridge (`kafklient mcp-client`)
+
+```bash
+uv run kafklient mcp-client --bootstrap-servers localhost:9092
 ```
 
 Useful flags:
