@@ -72,7 +72,8 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                 command="uv",
                 args=[
                     "run",
-                    "kafklient-mcp-client",
+                    "kafklient",
+                    "mcp-client",
                     "--bootstrap-servers",
                     KAFKA_BOOTSTRAP,
                     "--producer-topic",
@@ -180,7 +181,8 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                 command="uv",
                 args=[
                     "run",
-                    "kafklient-mcp-client",
+                    "kafklient",
+                    "mcp-client",
                     "--bootstrap-servers",
                     KAFKA_BOOTSTRAP,
                     "--producer-topic",
@@ -197,7 +199,8 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                 command="uv",
                 args=[
                     "run",
-                    "kafklient-mcp-client",
+                    "kafklient",
+                    "mcp-client",
                     "--bootstrap-servers",
                     KAFKA_BOOTSTRAP,
                     "--producer-topic",
