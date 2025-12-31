@@ -15,9 +15,8 @@ from dataclasses import dataclass
 
 from kafklient import KafkaListener, KafkaRPC, Message, create_producer
 from kafklient.types.parser import Parser
-
-from ._config import KAFKA_BOOTSTRAP
-from ._utils import (
+from tests._config import KAFKA_BOOTSTRAP
+from tests._utils import (
     create_echo_rpc_server,
     make_consumer_config,
     make_producer_config,

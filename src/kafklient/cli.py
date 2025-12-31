@@ -235,7 +235,6 @@ def mcp_server(
         default_object_name: str | None,
         param_hint: str | None,
     ) -> Server:
-
         def is_server_instance(obj: object) -> TypeGuard[Server]:
             return isinstance(obj, Server)
 

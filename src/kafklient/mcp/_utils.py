@@ -132,7 +132,6 @@ def parse_kafka_config(
     default_consumer_config: ConsumerConfig,
     default_producer_config: ProducerConfig,
 ) -> tuple[ConsumerConfig, ProducerConfig]:
-
     def _parse_kv_items(items: list[str]) -> dict[str, object]:
         def _parse_value(raw: str) -> object:
             lowered = raw.strip().lower()

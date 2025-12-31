@@ -23,7 +23,7 @@ from .types import (
     ProducerConfig,
     TopicPartition,
 )
-from .utils import Broadcaster, Callback, DedicatedThreadExecutor, TypeStream, Waiter
+from .utils import Broadcaster, BroadcasterStoppedError, Callback, DedicatedThreadExecutor, TypeStream, Waiter
 
 __all__ = [
     "KafkaBaseClient",
@@ -47,6 +47,7 @@ __all__ = [
     "ProducerConfig",
     "CommonConfig",
     "Broadcaster",
+    "BroadcasterStoppedError",
     "Callback",
     "TypeStream",
     "Waiter",

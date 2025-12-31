@@ -163,14 +163,16 @@ def create_json_echo_server(
 
         @server.handler(JsonEchoRequest)
         async def handle_json_echo(request: JsonEchoRequest, message: Message) -> bytes:  # pyright: ignore[reportUnusedFunction]
-            return json.dumps({
-                "status": "ok",
-                "echo": {
-                    "action": request.action,
-                    "value": request.value,
-                },
-                "server": "json-server",
-            }).encode()
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "echo": {
+                        "action": request.action,
+                        "value": request.value,
+                    },
+                    "server": "json-server",
+                }
+            ).encode()
 
         await server.start()
         server_ready.set()
