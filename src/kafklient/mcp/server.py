@@ -108,7 +108,7 @@ async def kafka_server_transport(
         yield read_stream, write_stream
 
 
-def log_server_banner(server: Server) -> None:
+def log_server_banner(server: Server, *, bootstrap_servers: str, consumer_topic: str, producer_topic: str) -> None:
     """Creates and logs a formatted banner with server information and logo.
     Reference: https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/cli.py
 
@@ -121,7 +121,7 @@ def log_server_banner(server: Server) -> None:
     """
 
     # Create the main title
-    title_text = Text(f"{type(server)} Server", style="bold blue")
+    title_text = Text("Kafklient - MCP over Kafka Server", style="bold blue")
 
     # Create the information table
     info_table = Table.grid(padding=(0, 1))
@@ -129,8 +129,10 @@ def log_server_banner(server: Server) -> None:
     info_table.add_column(style="cyan", justify="left")  # Label column
     info_table.add_column(style="dim", justify="left")  # Value column
 
-    info_table.add_row("🖥", "Server name:", Text(server.name + "\n", style="bold blue"))
-    info_table.add_row("📦", "Transport:", "STDIO over KAFKA")
+    info_table.add_row("🖥", "Server name:", Text(server.name, style="bold blue"))
+    info_table.add_row("🔗", "Bootstrap servers:", Text(bootstrap_servers, style="bold blue"))
+    info_table.add_row("📥", "Consumer(Requests) topic:", Text(consumer_topic, style="bold blue"))
+    info_table.add_row("📤", "Producer(Responses) topic:", Text(producer_topic, style="bold blue"))
 
     # Create panel with logo, title, and information using Group
     panel_content = Group(
@@ -177,7 +179,12 @@ async def run_server_async(
     """
     # Display server banner
     if show_banner:
-        log_server_banner(server=mcp)
+        log_server_banner(
+            server=mcp,
+            bootstrap_servers=bootstrap_servers,
+            consumer_topic=consumer_topic,
+            producer_topic=producer_topic,
+        )
 
     with temporary_log_level(log_level):
         mcp_server = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
