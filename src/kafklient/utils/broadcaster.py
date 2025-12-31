@@ -24,6 +24,7 @@ class Broadcaster(Generic[T]):
     _cond: asyncio.Condition = field(default_factory=asyncio.Condition, init=False, repr=False)
     _task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
     _callbacks: dict[str, Callback[T]] = field(default_factory=dict[str, Callback[T]], init=False, repr=False)
+    _callback_tasks: set[asyncio.Task[None]] = field(default_factory=set, init=False, repr=False)
     _stopping: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -46,6 +47,23 @@ class Broadcaster(Generic[T]):
                 await task
             except asyncio.CancelledError:
                 pass
+
+        tasks = list(self._callback_tasks)
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._callback_tasks.clear()
+
+        for callback in list(self._callbacks.values()):
+            if callback.task is not None and not callback.task.done():
+                callback.task.cancel()
+                try:
+                    await callback.task
+                except asyncio.CancelledError:
+                    pass
+            callback.task = None
 
     async def wait_next(self, after_version: int) -> T:
         async with self._cond:
@@ -71,7 +89,24 @@ class Broadcaster(Generic[T]):
 
                 # Fire callbacks without blocking the consumer loop
                 for cb in list(self._callbacks.values()):
-                    asyncio.create_task(self._safe_call(cb, item))
+                    t = asyncio.create_task(
+                        self._safe_call(cb, item),
+                        name=f"{self.name}-broadcaster-callback-{cb.name}",
+                    )
+                    cb.task = t
+                    self._callback_tasks.add(t)
+
+                    def _clear(
+                        task: asyncio.Task[None],
+                        *,
+                        _cb: Callback[T] = cb,
+                        _tasks: set[asyncio.Task[None]] = self._callback_tasks,
+                    ) -> None:
+                        _tasks.discard(task)
+                        if _cb.task is task:
+                            _cb.task = None
+
+                    t.add_done_callback(_clear)
                 if self._stopping:
                     break
         except asyncio.CancelledError:
