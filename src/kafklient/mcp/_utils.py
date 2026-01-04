@@ -6,11 +6,9 @@ from pathlib import Path
 import typer
 from pydantic import TypeAdapter
 
+from kafklient.mcp import _config
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
-
-REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
-SESSION_ID_HEADER_KEY = "x-session-id"
 
 
 def extract_header_bytes(record: KafkaMessage, header_key: str) -> bytes | None:
@@ -38,7 +36,7 @@ def extract_session_id(record: KafkaMessage) -> bytes | None:
     except Exception:
         headers = []
     for k, v in headers:
-        if k.lower() != SESSION_ID_HEADER_KEY.lower():
+        if k.lower() != _config.MCP_SESSION_ID_HEADER_KEY.lower():
             continue
         if v is None:  # pyright: ignore[reportUnnecessaryComparison]
             return None

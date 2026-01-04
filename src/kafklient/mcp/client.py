@@ -11,7 +11,8 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
 from kafklient.clients.listener import KafkaListener
-from kafklient.mcp._utils import REPLY_TOPIC_HEADER_KEY, SESSION_ID_HEADER_KEY, extract_header_bytes
+from kafklient.mcp import _config
+from kafklient.mcp._utils import extract_header_bytes
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
 from kafklient.types.parser import Parser
@@ -26,8 +27,8 @@ async def kafka_client_transport(
     producer_topic: str,
     *,
     consumer_group_id: str | None = None,
-    consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
-    producer_config: ProducerConfig = {},
+    consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
+    producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
     session_id: bytes | None = None,
@@ -71,7 +72,7 @@ async def kafka_client_transport(
             async with read_stream_writer:
                 async for record in stream:
                     if session_id is not None:
-                        sid = extract_header_bytes(record, SESSION_ID_HEADER_KEY)
+                        sid = extract_header_bytes(record, _config.MCP_SESSION_ID_HEADER_KEY)
                         # In isolation mode, drop messages that do not belong to "this session".
                         if sid != session_id:
                             continue
@@ -89,9 +90,11 @@ async def kafka_client_transport(
                 async for session_message in write_stream_reader:
                     json_str: str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
                     # Attach reply-topic so the server knows which response topic to use for this client/session.
-                    headers: list[tuple[str, str | bytes]] = [(REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))]
+                    headers: list[tuple[str, str | bytes]] = [
+                        (_config.MCP_REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))
+                    ]
                     if session_id is not None:
-                        headers.append((SESSION_ID_HEADER_KEY, session_id))
+                        headers.append((_config.MCP_SESSION_ID_HEADER_KEY, session_id))
                     await listener.produce(
                         producer_topic,
                         json_str.encode("utf-8"),
@@ -114,8 +117,8 @@ async def run_client_async(
     consumer_topic: str = "mcp-responses",
     producer_topic: str = "mcp-requests",
     consumer_group_id: Optional[str] = None,
-    consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
-    producer_config: ProducerConfig = {},
+    consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
+    producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
     isolate_session: bool = True,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,

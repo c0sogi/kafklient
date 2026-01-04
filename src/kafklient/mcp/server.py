@@ -23,6 +23,7 @@ from rich.table import Table
 from rich.text import Text
 
 from kafklient.clients.listener import KafkaListener
+from kafklient.mcp import _config
 from kafklient.mcp._utils import extract_header_bytes, extract_session_id
 from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
@@ -31,8 +32,6 @@ from kafklient.types.parser import Parser
 Server = mcp.server.FastMCP | fastmcp.FastMCP
 
 logger = logging.getLogger(__name__)
-REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
-SESSION_ID_HEADER_KEY = "x-session-id"
 
 
 @dataclass
@@ -56,8 +55,8 @@ async def kafka_server_transport(
     ready_event: asyncio.Event | None = None,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
-    consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
-    producer_config: ProducerConfig = {},
+    consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
+    producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
 ) -> AsyncIterator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]]]:
     read_stream_writer, read_stream = anyio.create_memory_object_stream[SessionMessage](0)
     write_stream, write_stream_reader = anyio.create_memory_object_stream[SessionMessage](0)
@@ -165,8 +164,8 @@ async def run_server_async(
     ready_event: asyncio.Event | None = None,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
-    consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
-    producer_config: ProducerConfig = {},
+    consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
+    producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
     show_banner: bool = True,
     log_level: str | None = None,
     multi_session: bool = True,
@@ -328,7 +327,7 @@ async def run_server_async(
                             async for session_message in write_stream_reader:
                                 json_str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
                                 headers: list[tuple[str, str | bytes]] | None = (
-                                    [(SESSION_ID_HEADER_KEY, session.session_id)]
+                                    [(_config.MCP_SESSION_ID_HEADER_KEY, session.session_id)]
                                     if session.session_id is not None
                                     else None
                                 )
@@ -353,7 +352,7 @@ async def run_server_async(
                     async for record in stream:
                         try:
                             msg = JSONRPCMessage.model_validate_json(record.value() or b"")
-                            if reply_topic_bytes := extract_header_bytes(record, REPLY_TOPIC_HEADER_KEY):
+                            if reply_topic_bytes := extract_header_bytes(record, _config.MCP_REPLY_TOPIC_HEADER_KEY):
                                 reply_topic: str = reply_topic_bytes.decode("utf-8", errors="replace")
                             else:
                                 reply_topic = producer_topic
@@ -421,8 +420,8 @@ def run_server(
     ready_event: asyncio.Event | None = None,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
-    consumer_config: ConsumerConfig = {"auto.offset.reset": "latest"},
-    producer_config: ProducerConfig = {},
+    consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
+    producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
     show_banner: bool = True,
     log_level: str | None = None,
     multi_session: bool = True,
