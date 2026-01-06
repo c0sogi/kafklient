@@ -57,6 +57,7 @@ def mcp_client(
     consumer_config: list[str] = typer.Option(
         [],
         "--consumer-config",
+        "-C",
         metavar="KEY=VALUE",
         help=(
             "Extra consumer config entries (repeatable). "
@@ -68,6 +69,7 @@ def mcp_client(
     producer_config: list[str] = typer.Option(
         [],
         "--producer-config",
+        "-P",
         metavar="KEY=VALUE",
         help="Extra producer config entries (repeatable). Example: --producer-config linger.ms=5",
         show_default=False,
@@ -181,6 +183,7 @@ def mcp_server(
     consumer_config: list[str] = typer.Option(
         [],
         "--consumer-config",
+        "-C",
         metavar="KEY=VALUE",
         help="Extra consumer config entries (repeatable).",
         show_default=False,
@@ -188,6 +191,7 @@ def mcp_server(
     producer_config: list[str] = typer.Option(
         [],
         "--producer-config",
+        "-P",
         metavar="KEY=VALUE",
         help="Extra producer config entries (repeatable).",
         show_default=False,
