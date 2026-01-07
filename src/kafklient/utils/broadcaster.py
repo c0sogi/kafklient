@@ -88,15 +88,25 @@ class Broadcaster(Generic[T]):
                     pass
             callback.task = None
 
-    async def wait_next(self, after_version: int) -> T:
+    async def wait_next(self, after_version: int | None = None) -> T:
+        """
+        Wait until a newer item is available.
+
+        If ``after_version`` is omitted, it is treated as the broadcaster's current version at call time,
+        i.e. this waits for the *next* publish.
+        """
         async with self._cond:
-            while self._version <= after_version and not self._stopping:
+            target_version = self._version if after_version is None else after_version
+            while self._version <= target_version and not self._stopping:
                 await self._cond.wait()
             # Only raise on stop if there is still no newer item available.
-            if self._version <= after_version and self._stopping:
+            if self._version <= target_version and self._stopping:
                 raise BroadcasterStoppedError(f"{self.name} broadcaster stopped while waiting for next item")
-            assert self._latest_item is not None
-            return self._latest_item
+            latest = self._latest_item
+            if latest is None:
+                # Defensive: should only be possible if stopped before any publish.
+                raise BroadcasterStoppedError(f"{self.name} broadcaster stopped while waiting for next item")
+            return latest
 
     def register_callback(self, callback: Callback[T]) -> None:
         self._callbacks[callback.name] = callback

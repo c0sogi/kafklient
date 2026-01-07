@@ -62,6 +62,31 @@ class TestBroadcaster(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "alpha")
         self.assertGreater(self.broadcaster.current_version, initial_version)
 
+    async def test_wait_next_without_after_version_waits_for_next_publish(self) -> None:
+        # publish one item to establish a non-zero version and latest item
+        v0 = self.broadcaster.current_version
+        await self.stream.publish("first")
+        first = await asyncio.wait_for(self.broadcaster.wait_next(v0), timeout=1.0)
+        self.assertEqual(first, "first")
+
+        # Without after_version, wait_next should wait for the next publish (not return immediately).
+        waiter = asyncio.create_task(self.broadcaster.wait_next())
+        await asyncio.sleep(0.01)
+        self.assertFalse(waiter.done(), "wait_next() should block until a new item arrives")
+
+        await self.stream.publish("second")
+        second = await asyncio.wait_for(waiter, timeout=1.0)
+        self.assertEqual(second, "second")
+
+    async def test_wait_next_without_after_version_raises_on_stop_before_first_item(self) -> None:
+        waiter = asyncio.create_task(self.broadcaster.wait_next())
+        await asyncio.sleep(0)
+
+        await self.broadcaster.stop()
+
+        with self.assertRaises(BroadcasterStoppedError):
+            await asyncio.wait_for(waiter, timeout=1.0)
+
     async def test_wait_next_raises_when_stopped(self) -> None:
         v0 = self.broadcaster.current_version
         waiter = asyncio.create_task(self.broadcaster.wait_next(v0))
