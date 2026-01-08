@@ -12,7 +12,7 @@ app = typer.Typer(no_args_is_help=True)
 @app.command()
 def mcp_client(
     bootstrap_servers: str = typer.Option(
-        "localhost:9092",
+        "127.0.0.1:9092",
         "--bootstrap-servers",
         "-b",
         envvar="KAFKLIENT_MCP_BOOTSTRAP",
@@ -139,7 +139,7 @@ def mcp_server(
         help=("FastMCP object spec. e.g. mypkg.myserver:mcp or ./myserver.py:mcp (':' is optional)"),
     ),
     bootstrap_servers: str = typer.Option(
-        "localhost:9092",
+        "127.0.0.1:9092",
         "--bootstrap-servers",
         "-b",
         envvar="KAFKLIENT_MCP_BOOTSTRAP",

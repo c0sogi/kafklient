@@ -1,6 +1,8 @@
 import asyncio
+from collections.abc import ItemsView, Iterator, KeysView, ValuesView
 from dataclasses import dataclass, field
 from logging import getLogger
+from types import TracebackType
 from typing import (
     AsyncIterator,
     Awaitable,
@@ -8,8 +10,11 @@ from typing import (
     Generic,
     Literal,
     Optional,
+    Self,
     TypeAlias,
     TypeVar,
+    cast,
+    overload,
 )
 
 T = TypeVar("T")
@@ -22,6 +27,8 @@ CallbackPolicy: TypeAlias = Literal[
     "switch",
 ]
 
+type CallbackFn[T] = Callable[[T], Awaitable[None]]
+
 
 class BroadcasterStoppedError(RuntimeError):
     """Raised when waiting for the next item but the broadcaster is stopping/stopped."""
@@ -30,7 +37,7 @@ class BroadcasterStoppedError(RuntimeError):
 @dataclass
 class Callback(Generic[T]):
     name: str
-    callback: Callable[[T], Awaitable[None]]
+    callback: CallbackFn[T]
     policy: CallbackPolicy = "merge"
     task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
 
@@ -52,6 +59,84 @@ class Broadcaster(Generic[T]):
     @property
     def current_version(self) -> int:
         return self._version
+
+    # --- dict-like callback accessors (name -> Callback) ---
+
+    def __len__(self) -> int:
+        return len(self._callbacks)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._callbacks)
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and name in self._callbacks
+
+    def keys(self) -> KeysView[str]:
+        return self._callbacks.keys()
+
+    def values(self) -> ValuesView[Callback[T]]:
+        return self._callbacks.values()
+
+    def items(self) -> ItemsView[str, Callback[T]]:
+        return self._callbacks.items()
+
+    def get(self, name: str, default: Callback[T] | None = None) -> Callback[T] | None:
+        return self._callbacks.get(name, default)
+
+    def pop(self, name: str) -> Callback[T]:
+        cb = self._callbacks.get(name)
+        if cb is None:
+            raise KeyError(name)
+        self.unregister_callback(name)
+        return cb
+
+    def __getitem__(self, name: str) -> Callback[T]:
+        return self._callbacks[name]
+
+    @overload
+    def __setitem__(self, name: str, value: Callback[T]) -> None: ...
+
+    @overload
+    def __setitem__(self, name: str, value: CallbackFn[T]) -> None: ...
+
+    @overload
+    def __setitem__(self, name: str, value: tuple[CallbackFn[T], CallbackPolicy]) -> None: ...
+
+    def __setitem__(self, name: str, value: Callback[T] | CallbackFn[T] | tuple[CallbackFn[T], CallbackPolicy]) -> None:
+        """
+        Dict-like registration:
+
+        - ``b["cb"] = callback_fn`` registers a callback with default policy ("merge")
+        - ``b["cb"] = (callback_fn, "switch")`` registers with explicit policy
+        - ``b["cb"] = Callback(...)`` registers (name is normalized to the key)
+        """
+        cb: Callback[T]
+        if isinstance(value, tuple):
+            fn, policy = cast(tuple[CallbackFn[T], CallbackPolicy], value)
+            cb = Callback(name=name, callback=fn, policy=policy)
+        elif isinstance(value, Callback):
+            v = cast(Callback[T], value)
+            cb = v if v.name == name else Callback(name=name, callback=v.callback, policy=v.policy)
+        else:
+            cb = Callback(name=name, callback=value)
+        self.register_callback(cb)
+
+    def __delitem__(self, name: str) -> None:
+        if name not in self._callbacks:
+            raise KeyError(name)
+        self.unregister_callback(name)
+
+    async def __aenter__(self) -> Self:
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.stop()
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():

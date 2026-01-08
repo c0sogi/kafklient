@@ -62,6 +62,60 @@ class TestBroadcaster(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "alpha")
         self.assertGreater(self.broadcaster.current_version, initial_version)
 
+    async def test_async_with_starts_and_stops(self) -> None:
+        stream: QueueStream[str] = QueueStream()
+        async with Broadcaster(name="ctx-broker", listener=stream.listener) as b:
+            await stream.wait_for_subscription(expected=1)
+
+        with self.assertRaises(BroadcasterStoppedError):
+            await asyncio.wait_for(b.wait_next(), timeout=1.0)
+
+    async def test_dict_like_callback_operators(self) -> None:
+        calls: list[str] = []
+        done = asyncio.Event()
+
+        async def cb(item: str) -> None:
+            calls.append(item)
+            done.set()
+
+        self.assertNotIn("cb", self.broadcaster)
+        initial_len = len(self.broadcaster)
+
+        # set via function (default policy)
+        self.broadcaster["cb"] = cb
+        self.assertIn("cb", self.broadcaster)
+        self.assertEqual(len(self.broadcaster), initial_len + 1)
+        self.assertIs(self.broadcaster["cb"].callback, cb)
+        self.assertEqual(self.broadcaster["cb"].policy, "merge")
+
+        await self.stream.publish("x")
+        await asyncio.wait_for(done.wait(), timeout=1.0)
+        self.assertEqual(calls, ["x"])
+
+        # update via (fn, policy)
+        done.clear()
+
+        async def cb2(item: str) -> None:
+            calls.append(f"cb2:{item}")
+            done.set()
+
+        self.broadcaster["cb"] = (cb2, "switch")
+        self.assertEqual(self.broadcaster["cb"].policy, "switch")
+        self.assertIs(self.broadcaster["cb"].callback, cb2)
+
+        await self.stream.publish("y")
+        await asyncio.wait_for(done.wait(), timeout=1.0)
+        self.assertIn("cb2:y", calls)
+
+        # delete via del
+        del self.broadcaster["cb"]
+        self.assertNotIn("cb", self.broadcaster)
+        self.assertEqual(len(self.broadcaster), initial_len)
+
+        # pop raises on missing key after deletion
+        with self.assertRaises(KeyError):
+            self.broadcaster.pop("cb")
+
     async def test_wait_next_without_after_version_waits_for_next_publish(self) -> None:
         # publish one item to establish a non-zero version and latest item
         v0 = self.broadcaster.current_version

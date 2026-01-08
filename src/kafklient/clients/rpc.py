@@ -208,8 +208,8 @@ class KafkaRPCServer(KafkaBaseClient):
 
     Usage:
         server = KafkaRPCServer(
-            consumer_config={"bootstrap.servers": "localhost:9092", "group.id": "my-server"},
-            producer_config={"bootstrap.servers": "localhost:9092"},
+            consumer_config={"bootstrap.servers": "127.0.0.1:9092", "group.id": "my-server"},
+            producer_config={"bootstrap.servers": "127.0.0.1:9092"},
             parsers=[ParserSpec(topics=["requests"], type=MyRequest, parser=parse_request)],
         )
 

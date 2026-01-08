@@ -112,7 +112,7 @@ async def kafka_client_transport(
 
 
 async def run_client_async(
-    bootstrap_servers: str = "localhost:9092",
+    bootstrap_servers: str = "127.0.0.1:9092",
     *,
     consumer_topic: str = "mcp-responses",
     producer_topic: str = "mcp-requests",

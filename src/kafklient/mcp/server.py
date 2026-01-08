@@ -231,7 +231,7 @@ def log_server_banner(server: Server, *, bootstrap_servers: str, consumer_topic:
 async def run_server_async(
     mcp: Server,
     *,
-    bootstrap_servers: str = "localhost:9092",
+    bootstrap_servers: str = "127.0.0.1:9092",
     consumer_topic: str = "mcp-requests",
     producer_topic: str = "mcp-responses",
     consumer_group_id: str | None = None,
@@ -594,7 +594,7 @@ async def run_server_async(
 def run_server(
     mcp: Server,
     *,
-    bootstrap_servers: str = "localhost:9092",
+    bootstrap_servers: str = "127.0.0.1:9092",
     consumer_topic: str = "mcp-requests",
     producer_topic: str = "mcp-responses",
     consumer_group_id: str | None = None,

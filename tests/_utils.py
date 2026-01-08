@@ -1,6 +1,6 @@
 """
 Comprehensive tests for kafklient library.
-Requires a running Kafka broker at localhost:9092.
+Requires a running Kafka broker at 127.0.0.1:9092.
 
 Run with: python test.py
 """

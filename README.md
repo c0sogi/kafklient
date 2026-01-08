@@ -45,7 +45,7 @@ This repository includes a single-node Kafka `docker-compose.yml` for local test
 docker compose up -d
 ```
 
-Default bootstrap server: `localhost:9092`.
+Default bootstrap server: `127.0.0.1:9092`.
 
 ## Core concepts
 
@@ -105,11 +105,11 @@ async def main() -> None:
     topic = "hello-events"
 
     consumer_config: ConsumerConfig = {
-        "bootstrap.servers": "localhost:9092",
+        "bootstrap.servers": "127.0.0.1:9092",
         "group.id": "hello-listener",
         "auto.offset.reset": "latest",
     }
-    producer_config: ProducerConfig = {"bootstrap.servers": "localhost:9092"}
+    producer_config: ProducerConfig = {"bootstrap.servers": "127.0.0.1:9092"}
 
     async with KafkaListener(
         parsers=[Parser[Hello](topics=[topic], factory=parse_hello)],
@@ -172,11 +172,11 @@ async def run_server(*, ready: asyncio.Event, stop: asyncio.Event) -> None:
     request_topic = "rpc-requests"
 
     server_consumer_config: ConsumerConfig = {
-        "bootstrap.servers": "localhost:9092",
+        "bootstrap.servers": "127.0.0.1:9092",
         "group.id": "rpc-server",
         "auto.offset.reset": "latest",
     }
-    server_producer_config: ProducerConfig = {"bootstrap.servers": "localhost:9092"}
+    server_producer_config: ProducerConfig = {"bootstrap.servers": "127.0.0.1:9092"}
 
     server = KafkaRPCServer(
         parsers=[Parser[EchoRequest](topics=[request_topic], factory=parse_echo_request)],
@@ -206,11 +206,11 @@ async def main() -> None:
     server_task = asyncio.create_task(run_server(ready=server_ready, stop=server_stop))
 
     rpc_consumer_config: ConsumerConfig = {
-        "bootstrap.servers": "localhost:9092",
+        "bootstrap.servers": "127.0.0.1:9092",
         "group.id": "rpc-client-1",
         "auto.offset.reset": "latest",
     }
-    rpc_producer_config: ProducerConfig = {"bootstrap.servers": "localhost:9092"}
+    rpc_producer_config: ProducerConfig = {"bootstrap.servers": "127.0.0.1:9092"}
 
     rpc = KafkaRPC(
         parsers=[Parser[bytes](topics=[reply_topic], factory=parse_bytes)],
@@ -287,7 +287,7 @@ def echo(message: str) -> str:
 if __name__ == "__main__":
     run_server(
         mcp,
-        bootstrap_servers="localhost:9092",
+        bootstrap_servers="127.0.0.1:9092",
         consumer_topic="mcp-requests",
         producer_topic="mcp-responses",
         consumer_group_id="mcp-server",
@@ -311,16 +311,16 @@ Supported `--mcp` formats:
 
 ```bash
 # Module-based
-kafklient mcp-server --mcp mypkg.myserver:mcp --bootstrap-servers localhost:9092
+kafklient mcp-server --mcp mypkg.myserver:mcp --bootstrap-servers 127.0.0.1:9092
 
 # File-based
-kafklient mcp-server --mcp ./myserver.py:mcp --bootstrap-servers localhost:9092
+kafklient mcp-server --mcp ./myserver.py:mcp --bootstrap-servers 127.0.0.1:9092
 ```
 
 ### CLI: stdio <-> Kafka bridge (`kafklient mcp-client`)
 
 ```bash
-uv run kafklient mcp-client --bootstrap-servers localhost:9092
+uv run kafklient mcp-client --bootstrap-servers 127.0.0.1:9092
 ```
 
 Useful flags:

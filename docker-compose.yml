@@ -20,8 +20,8 @@ services:
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       # Address to advertise to clients (advertised address)
       # INTERNAL: Docker internal service (Control Center) uses 'kafka' host name
-      # EXTERNAL: External (Host) uses 'localhost'
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      # EXTERNAL: External (Host) uses IPv4 loopback by default to avoid Windows preferring IPv6 (::1) for "localhost"
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://127.0.0.1:9092
       # Listener for inter-broker communication
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       # --------------------------------
