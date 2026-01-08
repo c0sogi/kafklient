@@ -29,7 +29,7 @@ from ..types.backend import (
     Consumer,
     KafkaError,
     Message,
-    NewTopic,
+    NewTopic,  # pyright: ignore[reportPrivateImportUsage]
     Producer,
     TopicPartition,
 )
@@ -519,7 +519,7 @@ class KafkaBaseClient(ABC):
 
                 # Wait for creation to complete
                 created: list[str] = []
-                for topic, future in admin.create_topics(new_topics).items():
+                for topic, future in admin.create_topics(new_topics).items():  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
                     try:
                         future.result(timeout=timeout)
                         created.append(topic)
@@ -592,7 +592,7 @@ class KafkaBaseClient(ABC):
                 # Delete all topics
                 # Wait for deletion to complete
                 deleted: list[str] = []
-                for topic, future in admin.delete_topics(topics_to_delete, operation_timeout=int(timeout)).items():
+                for topic, future in admin.delete_topics(topics_to_delete, operation_timeout=int(timeout)).items():  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
                     try:
                         future.result(timeout=timeout)
                         deleted.append(topic)
@@ -620,7 +620,7 @@ class KafkaBaseClient(ABC):
         callback: Callable[[KafkaError | None, Message], None] | None = None,
         on_delivery: Callable[[KafkaError | None, Message], None] | None = None,
         timestamp: int = 0,
-        headers: dict[str, str | bytes] | list[tuple[str, str | bytes]] | None = None,
+        headers: dict[str, str | bytes | None] | list[tuple[str, str | bytes | None]] | None = None,
         flush: bool = False,
         flush_timeout: float | None = None,
     ) -> None:

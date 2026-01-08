@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 from uuid import uuid4
 
 import anyio
@@ -90,7 +90,7 @@ async def kafka_client_transport(
                 async for session_message in write_stream_reader:
                     json_str: str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
                     # Attach reply-topic so the server knows which response topic to use for this client/session.
-                    headers: list[tuple[str, str | bytes]] = [
+                    headers: list[tuple[str, str | bytes | None]] = [
                         (_config.MCP_REPLY_TOPIC_HEADER_KEY, consumer_topic.encode("utf-8"))
                     ]
                     if session_id is not None:
@@ -153,8 +153,7 @@ async def run_client_async(
                 def _extract_method(msg: SessionMessage) -> str | None:
                     # We avoid depending on the exact JSONRPCMessage variant classes
                     # (request/notification/response) and just inspect the dumped payload.
-                    payload: dict[str, Any] = msg.message.model_dump(by_alias=True, exclude_none=True)
-                    method = payload.get("method")
+                    method = getattr(msg.message.root, "method", None)
                     return method if isinstance(method, str) else None
 
                 async def forward_stdio_to_kafka() -> None:

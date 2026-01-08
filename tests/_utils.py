@@ -80,7 +80,7 @@ def make_producer_config() -> ProducerConfig:
 async def produce_messages(
     topic: str,
     messages: Sequence[tuple[bytes | None, bytes]],  # (key, value)
-    headers: list[tuple[str, str | bytes]] | None = None,
+    headers: list[tuple[str, str | bytes | None]] | None = None,
 ) -> None:
     """Produce messages to a topic for testing."""
     producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})

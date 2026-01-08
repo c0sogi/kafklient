@@ -64,7 +64,7 @@ class KafkaRPC(KafkaBaseClient):
         req_headers_reply_to: Optional[list[str]],
         *,
         req_key: Optional[bytes] = None,
-        req_headers: Optional[list[tuple[str, str | bytes]]] = None,
+        req_headers: Optional[list[tuple[str, str | bytes | None]]] = None,
         res_timeout: float = 30.0,
         res_expect_type: Optional[Type[T]] = None,
         correlation_id: Optional[bytes] = None,
@@ -135,7 +135,7 @@ class KafkaRPC(KafkaBaseClient):
         topic: str,
         value: bytes,
         key: Optional[bytes],
-        headers: list[tuple[str, str | bytes]] | None,
+        headers: list[tuple[str, str | bytes | None]] | None,
     ) -> None:
         loop = asyncio.get_running_loop()
         delivery_future: asyncio.Future[Message | None] = loop.create_future()
@@ -349,7 +349,7 @@ class KafkaRPCServer(KafkaBaseClient):
 
         # Build key and headers based on propagate_corr_to setting
         msg_key: Optional[bytes] = None
-        msg_headers: list[tuple[str, str | bytes]] = []
+        msg_headers: list[tuple[str, str | bytes | None]] = []
 
         if correlation_id:
             if self.propagate_corr_to == "key" or self.propagate_corr_to == "both":
