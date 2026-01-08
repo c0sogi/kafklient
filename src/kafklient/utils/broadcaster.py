@@ -45,6 +45,7 @@ class Broadcaster(Generic[T]):
     _cond: asyncio.Condition = field(default_factory=asyncio.Condition, init=False, repr=False)
     _task: Optional[asyncio.Task[None]] = field(default=None, init=False, repr=False)
     _callbacks: dict[str, Callback[T]] = field(default_factory=dict[str, Callback[T]], init=False, repr=False)
+    _callback_order: list[str] = field(default_factory=list[str], init=False, repr=False)
     _callback_tasks: set[asyncio.Task[None]] = field(default_factory=set[asyncio.Task[None]], init=False, repr=False)
     _stopping: bool = field(default=False, init=False, repr=False)
 
@@ -108,11 +109,182 @@ class Broadcaster(Generic[T]):
                 raise BroadcasterStoppedError(f"{self.name} broadcaster stopped while waiting for next item")
             return latest
 
-    def register_callback(self, callback: Callback[T]) -> None:
-        self._callbacks[callback.name] = callback
+    def register_callback(
+        self,
+        callback: Callback[T],
+        *,
+        before: Optional[str] = None,
+        after: Optional[str] = None,
+    ) -> None:
+        """
+        Register a callback with optional ordering.
 
-    def unregister_callback(self, name: str) -> None:
-        self._callbacks.pop(name, None)
+        Args:
+            callback: The callback to register.
+            before: Place this callback before the named callback. Mutually exclusive with ``after``.
+            after: Place this callback after the named callback. Mutually exclusive with ``before``.
+
+        Raises:
+            ValueError: If both ``before`` and ``after`` are specified, or if the reference callback doesn't exist.
+        """
+        if before is not None and after is not None:
+            raise ValueError("Cannot specify both 'before' and 'after'")
+        if before is not None and before == callback.name:
+            raise ValueError("Cannot register callback with 'before' pointing to itself")
+        if after is not None and after == callback.name:
+            raise ValueError("Cannot register callback with 'after' pointing to itself")
+
+        # Validate before/after references BEFORE modifying _callback_order
+        if before is not None:
+            if before not in self._callbacks:
+                raise ValueError(f"Callback '{before}' not found")
+            if before not in self._callback_order:
+                raise ValueError(f"Callback '{before}' not found in callback order")
+        elif after is not None:
+            if after not in self._callbacks:
+                raise ValueError(f"Callback '{after}' not found")
+            if after not in self._callback_order:
+                raise ValueError(f"Callback '{after}' not found in callback order")
+
+        if callback.name in self._callbacks:
+            # Update existing callback, preserve order unless explicitly reordered
+            self._callbacks[callback.name] = callback
+            if before is None and after is None:
+                return
+            # Remove from current position (validation already passed)
+            if callback.name in self._callback_order:
+                self._callback_order.remove(callback.name)
+        else:
+            self._callbacks[callback.name] = callback
+
+        if before is not None:
+            idx = self._callback_order.index(before)
+            self._callback_order.insert(idx, callback.name)
+        elif after is not None:
+            idx = self._callback_order.index(after)
+            self._callback_order.insert(idx + 1, callback.name)
+        else:
+            # Default: append to end
+            if callback.name not in self._callback_order:
+                self._callback_order.append(callback.name)
+
+    def unregister_callback(self, name: str) -> bool:
+        """Unregister a callback by name."""
+        removed = self._callbacks.pop(name, None) is not None
+        if name in self._callback_order:
+            self._callback_order.remove(name)
+        return removed
+
+    def reorder_callback(
+        self,
+        name: str,
+        *,
+        before: Optional[str] = None,
+        after: Optional[str] = None,
+    ) -> None:
+        """
+        Reorder an existing callback.
+
+        Args:
+            name: Name of the callback to reorder.
+            before: Place this callback before the named callback. Mutually exclusive with ``after``.
+            after: Place this callback after the named callback. Mutually exclusive with ``before``.
+
+        Raises:
+            ValueError: If the callback doesn't exist, both ``before`` and ``after`` are specified,
+                       or the reference callback doesn't exist.
+        """
+        if name not in self._callbacks:
+            raise ValueError(f"Callback '{name}' not found")
+        if before is not None and after is not None:
+            raise ValueError("Cannot specify both 'before' and 'after'")
+        if before is not None and before == name:
+            raise ValueError("Cannot reorder callback with 'before' pointing to itself")
+        if after is not None and after == name:
+            raise ValueError("Cannot reorder callback with 'after' pointing to itself")
+
+        # Validate before/after references BEFORE modifying _callback_order
+        if before is not None:
+            if before not in self._callbacks:
+                raise ValueError(f"Callback '{before}' not found")
+            if before not in self._callback_order:
+                raise ValueError(f"Callback '{before}' not found in callback order")
+        elif after is not None:
+            if after not in self._callbacks:
+                raise ValueError(f"Callback '{after}' not found")
+            if after not in self._callback_order:
+                raise ValueError(f"Callback '{after}' not found in callback order")
+
+        if name not in self._callback_order:
+            # Callback exists but not in order list, add it (validation already passed)
+            if before is not None:
+                idx = self._callback_order.index(before)
+                self._callback_order.insert(idx, name)
+            elif after is not None:
+                idx = self._callback_order.index(after)
+                self._callback_order.insert(idx + 1, name)
+            else:
+                self._callback_order.append(name)
+            return
+
+        # Remove from current position (validation already passed)
+        self._callback_order.remove(name)
+
+        if before is not None:
+            idx = self._callback_order.index(before)
+            self._callback_order.insert(idx, name)
+        elif after is not None:
+            idx = self._callback_order.index(after)
+            self._callback_order.insert(idx + 1, name)
+        else:
+            # Default: append to end
+            self._callback_order.append(name)
+
+    def get_callback_order(self) -> list[str]:
+        """
+        Get the current execution order of callbacks.
+
+        Returns:
+            List of callback names in execution order.
+        """
+        return self._callback_order.copy()
+
+    def set_callback_order(self, order: list[str]) -> None:
+        """
+        Set the execution order of callbacks in bulk.
+
+        Args:
+            order: List of callback names in the desired execution order.
+                  Must contain all registered callbacks, but can omit some callbacks
+                  (omitted callbacks will be appended at the end in their current order).
+
+        Raises:
+            ValueError: If any callback name in the order doesn't exist or if duplicates are provided.
+        """
+        # Validate that the order list doesn't have duplicates
+        if len(order) != len(set(order)):
+            raise ValueError("Callback order contains duplicate names")
+
+        # Validate that all specified callbacks exist
+        for name in order:
+            if name not in self._callbacks:
+                raise ValueError(f"Callback '{name}' not found")
+
+        # Get callbacks not in the provided order (to append at the end)
+        existing_callbacks = set(self._callbacks.keys())
+        specified_callbacks = set(order)
+        omitted_callbacks = existing_callbacks - specified_callbacks
+
+        # Build the new order: specified order + omitted callbacks in their current order
+        new_order = list(order)
+        if omitted_callbacks:
+            # Preserve current order for omitted callbacks
+            current_order = list(self._callback_order) if self._callback_order else list(self._callbacks.keys())
+            for name in current_order:
+                if name in omitted_callbacks and name not in new_order:
+                    new_order.append(name)
+
+        self._callback_order = new_order
 
     async def _run_consumer(self) -> None:
         backoff_s = 0.1
@@ -131,7 +303,14 @@ class Broadcaster(Generic[T]):
                         self._cond.notify_all()
 
                     # Fire callbacks without blocking the consumer loop
-                    for cb in list(self._callbacks.values()):
+                    # Use _callback_order to maintain execution order
+                    callback_names = (
+                        list(self._callback_order) if self._callback_order else list(self._callbacks.keys())
+                    )
+                    for cb_name in callback_names:
+                        if cb_name not in self._callbacks:
+                            continue
+                        cb = self._callbacks[cb_name]
                         if cb.policy == "exhaust" and cb.task is not None and not cb.task.done():
                             continue
                         if cb.policy == "switch" and cb.task is not None and not cb.task.done():

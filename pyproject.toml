@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "kafklient"
-version = "0.4.6"
+version = "0.4.7"
 description = "Async Kafka helpers built on confluent_kafka."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -292,3 +292,642 @@ class TestBroadcaster(unittest.IsolatedAsyncioTestCase):
 
         # stop() should cancel pending concat tasks cleanly (no hang).
         await asyncio.wait_for(self.broadcaster.stop(), timeout=1.0)
+
+    async def test_register_callback_with_before_parameter(self) -> None:
+        """Test registering callback with 'before' parameter."""
+        call_order: list[str] = []
+
+        async def cb1(item: str) -> None:
+            call_order.append("cb1")
+
+        async def cb2(item: str) -> None:
+            call_order.append("cb2")
+
+        async def cb3(item: str) -> None:
+            call_order.append("cb3")
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        # Register cb3 before cb1
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3), before="cb1")
+
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb3", "cb1", "cb2"])
+
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+
+        # Callbacks should be called in order: cb3, cb1, cb2
+        self.assertEqual(call_order, ["cb3", "cb1", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+
+    async def test_register_callback_with_after_parameter(self) -> None:
+        """Test registering callback with 'after' parameter."""
+        call_order: list[str] = []
+
+        async def cb1(item: str) -> None:
+            call_order.append("cb1")
+
+        async def cb2(item: str) -> None:
+            call_order.append("cb2")
+
+        async def cb3(item: str) -> None:
+            call_order.append("cb3")
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        # Register cb3 after cb1
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3), after="cb1")
+
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb3", "cb2"])
+
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+
+        # Callbacks should be called in order: cb1, cb3, cb2
+        self.assertEqual(call_order, ["cb1", "cb3", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+
+    async def test_register_callback_before_after_validation(self) -> None:
+        """Test that register_callback validates before/after parameters."""
+
+        async def cb(item: str) -> None:
+            pass
+
+        # Cannot specify both before and after
+        with self.assertRaises(ValueError, msg="Cannot specify both 'before' and 'after'"):
+            self.broadcaster.register_callback(Callback(name="cb", callback=cb), before="other", after="another")
+
+        # Reference callback must exist
+        with self.assertRaises(ValueError, msg="Reference callback not found"):
+            self.broadcaster.register_callback(Callback(name="cb", callback=cb), before="nonexistent")
+
+    async def test_register_callback_before_after_self_is_rejected(self) -> None:
+        """Regression: reject before/after pointing to the callback being registered/updated."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb1_updated(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+
+        with self.assertRaisesRegex(ValueError, "before.*itself"):
+            self.broadcaster.register_callback(Callback(name="cb1", callback=cb1_updated), before="cb1")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+
+        with self.assertRaisesRegex(ValueError, "after.*itself"):
+            self.broadcaster.register_callback(Callback(name="cb1", callback=cb1_updated), after="cb1")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+
+        self.broadcaster.unregister_callback("cb1")
+
+    async def test_reorder_callback(self) -> None:
+        """Test reordering existing callbacks."""
+        call_order: list[str] = []
+
+        async def cb1(item: str) -> None:
+            call_order.append("cb1")
+
+        async def cb2(item: str) -> None:
+            call_order.append("cb2")
+
+        async def cb3(item: str) -> None:
+            call_order.append("cb3")
+
+        # Register in order: cb1, cb2, cb3
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3))
+
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2", "cb3"])
+
+        # Reorder: move cb3 before cb1
+        self.broadcaster.reorder_callback("cb3", before="cb1")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb3", "cb1", "cb2"])
+
+        call_order.clear()
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["cb3", "cb1", "cb2"])
+
+        # Reorder: move cb2 after cb3
+        self.broadcaster.reorder_callback("cb2", after="cb3")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb3", "cb2", "cb1"])
+
+        call_order.clear()
+        await self.stream.publish("test2")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["cb3", "cb2", "cb1"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+
+    async def test_reorder_callback_validation(self) -> None:
+        """Test that reorder_callback validates parameters."""
+
+        async def cb(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb", callback=cb))
+
+        # Cannot specify both before and after
+        with self.assertRaises(ValueError, msg="Cannot specify both 'before' and 'after'"):
+            self.broadcaster.reorder_callback("cb", before="other", after="another")
+
+        # Callback must exist
+        with self.assertRaises(ValueError, msg="Callback not found"):
+            self.broadcaster.reorder_callback("nonexistent", before="cb")
+
+        # Reference callback must exist
+        with self.assertRaises(ValueError, msg="Reference callback not found"):
+            self.broadcaster.reorder_callback("cb", before="nonexistent")
+
+        self.broadcaster.unregister_callback("cb")
+
+    async def test_reorder_callback_before_after_self_is_rejected(self) -> None:
+        """Regression: reject before/after pointing to the callback being reordered."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        with self.assertRaisesRegex(ValueError, "before.*itself"):
+            self.broadcaster.reorder_callback("cb1", before="cb1")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        with self.assertRaisesRegex(ValueError, "after.*itself"):
+            self.broadcaster.reorder_callback("cb1", after="cb1")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+
+    async def test_set_callback_order(self) -> None:
+        """Test setting callback order in bulk."""
+        call_order: list[str] = []
+
+        async def cb1(item: str) -> None:
+            call_order.append("cb1")
+
+        async def cb2(item: str) -> None:
+            call_order.append("cb2")
+
+        async def cb3(item: str) -> None:
+            call_order.append("cb3")
+
+        async def cb4(item: str) -> None:
+            call_order.append("cb4")
+
+        # Register callbacks
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3))
+        self.broadcaster.register_callback(Callback(name="cb4", callback=cb4))
+
+        # Set new order: cb4, cb2, cb1, cb3
+        self.broadcaster.set_callback_order(["cb4", "cb2", "cb1", "cb3"])
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb4", "cb2", "cb1", "cb3"])
+
+        call_order.clear()
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["cb4", "cb2", "cb1", "cb3"])
+
+        # Set partial order: only cb3, cb1 (cb2 and cb4 should be appended in current order)
+        self.broadcaster.set_callback_order(["cb3", "cb1"])
+        # Current order was ["cb4", "cb2", "cb1", "cb3"], so omitted ones (cb4, cb2) keep their order
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb3", "cb1", "cb4", "cb2"])
+
+        call_order.clear()
+        await self.stream.publish("test2")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["cb3", "cb1", "cb4", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+        self.broadcaster.unregister_callback("cb4")
+
+    async def test_set_callback_order_validation(self) -> None:
+        """Test that set_callback_order validates parameters."""
+
+        async def cb(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb", callback=cb))
+
+        # All specified callbacks must exist
+        with self.assertRaises(ValueError, msg="Callback not found"):
+            self.broadcaster.set_callback_order(["cb", "nonexistent"])
+
+        self.broadcaster.unregister_callback("cb")
+
+    async def test_get_callback_order(self) -> None:
+        """Test getting callback order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Initially empty
+        self.assertEqual(self.broadcaster.get_callback_order(), [])
+
+        # Register callbacks
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+
+        order = self.broadcaster.get_callback_order()
+        self.assertEqual(order, ["cb1", "cb2"])
+
+        # Verify it's a copy (modifying shouldn't affect internal state)
+        order.append("cb3")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+
+    async def test_callback_order_preserved_on_update(self) -> None:
+        """Test that updating a callback preserves its order unless explicitly reordered."""
+        call_order: list[str] = []
+
+        async def cb1_v1(item: str) -> None:
+            call_order.append("cb1_v1")
+
+        async def cb1_v2(item: str) -> None:
+            call_order.append("cb1_v2")
+
+        async def cb2(item: str) -> None:
+            call_order.append("cb2")
+
+        # Register callbacks
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1_v1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        # Update cb1 without reordering - should preserve position
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1_v2))
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        call_order.clear()
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["cb1_v2", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+
+    async def test_unregister_callback_removes_from_order(self) -> None:
+        """Test that unregistering removes callback from order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        async def cb3(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3))
+
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2", "cb3"])
+
+        self.broadcaster.unregister_callback("cb2")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb3"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb3")
+        self.assertEqual(self.broadcaster.get_callback_order(), [])
+
+    async def test_unregister_callback_returns_true_if_present_in_callbacks_even_if_missing_in_order(self) -> None:
+        """Regression: return value should reflect presence in _callbacks, not _callback_order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.assertIn("cb1", self.broadcaster._callbacks)  # type: ignore[reportPrivateUsage]
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+
+        # Simulate edge case: callback exists but is missing from order list
+        self.broadcaster._callback_order.remove("cb1")  # type: ignore[reportPrivateUsage]
+        self.assertEqual(self.broadcaster.get_callback_order(), [])
+
+        removed = self.broadcaster.unregister_callback("cb1")
+        self.assertTrue(removed)
+        self.assertNotIn("cb1", self.broadcaster._callbacks)  # type: ignore[reportPrivateUsage]
+
+    async def test_callback_execution_order_with_different_policies(self) -> None:
+        """Test that callbacks execute in order regardless of policy."""
+        call_order: list[str] = []
+
+        async def cb1(item: str) -> None:
+            call_order.append("cb1")
+
+        async def cb2(item: str) -> None:
+            call_order.append("cb2")
+
+        async def cb3(item: str) -> None:
+            call_order.append("cb3")
+
+        # Register with different policies
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1, policy="merge"))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2, policy="concat"))
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3, policy="switch"))
+
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2", "cb3"])
+
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+
+        # All callbacks should be called in registration order
+        self.assertEqual(call_order, ["cb1", "cb2", "cb3"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+
+    async def test_reorder_callback_reference_not_in_order_list(self) -> None:
+        """Test Bug 1: reorder_callback when reference callback is not in _callback_order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Register cb1 normally
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        # Register cb2 but manually remove it from order list to simulate the bug scenario
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.broadcaster._callback_order.remove("cb2")  # type: ignore[reportPrivateUsage]
+
+        # Now cb2 is in _callbacks but not in _callback_order
+        # Try to reorder cb2 before cb1 - this should work
+        self.broadcaster.reorder_callback("cb2", before="cb1")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb2", "cb1"])
+
+        # Register cb3 (also not in order list initially)
+        self.broadcaster._callbacks["cb3"] = Callback(name="cb3", callback=cb1)  # type: ignore[reportPrivateUsage]
+
+        # Try to reorder cb3 before cb2 where cb2 IS in _callback_order - should work
+        self.broadcaster.reorder_callback("cb3", before="cb2")
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb3", "cb2", "cb1"])
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+
+    async def test_reorder_callback_reference_not_in_order_list_error(self) -> None:
+        """Test Bug 1: reorder_callback should error when reference is not in _callback_order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Register both callbacks
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+
+        # Manually remove cb2 from order list to simulate edge case
+        self.broadcaster._callback_order.remove("cb2")  # type: ignore[reportPrivateUsage]
+
+        # Create a third callback not in order list
+        self.broadcaster._callbacks["cb3"] = Callback(name="cb3", callback=cb1)  # type: ignore[reportPrivateUsage]
+
+        # Try to reorder cb3 before cb2 (where cb2 is NOT in _callback_order)
+        # This should raise a clear error
+        with self.assertRaises(ValueError, msg="Reference callback not in callback order"):
+            self.broadcaster.reorder_callback("cb3", before="cb2")
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
+
+    async def test_set_callback_order_with_duplicates(self) -> None:
+        """Test Bug 2: set_callback_order should reject duplicate names."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+
+        # Try to set order with duplicates - should raise ValueError
+        with self.assertRaises(ValueError, msg="Duplicate names"):
+            self.broadcaster.set_callback_order(["cb1", "cb1", "cb2"])
+
+        # Verify order wasn't changed
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+
+    async def test_set_callback_order_duplicates_dont_cause_multiple_execution(self) -> None:
+        """Test Bug 2: Verify duplicates would have caused multiple executions (if not fixed)."""
+        call_count: dict[str, int] = {"cb1": 0}
+
+        async def cb1(item: str) -> None:
+            call_count["cb1"] += 1
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+
+        # The bug fix prevents this, but verify the order is clean
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+
+        # Callback should only be called once
+        self.assertEqual(call_count["cb1"], 1)
+
+        self.broadcaster.unregister_callback("cb1")
+
+    async def test_register_callback_reference_not_in_order_list(self) -> None:
+        """Test that register_callback validates reference is in _callback_order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Register cb1 normally
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+
+        # Manually remove cb1 from order list to simulate edge case
+        self.broadcaster._callback_order.remove("cb1")  # type: ignore[reportPrivateUsage]
+
+        # Try to register cb2 before cb1 (where cb1 is NOT in _callback_order)
+        with self.assertRaises(ValueError, msg="Reference callback not in callback order"):
+            self.broadcaster.register_callback(Callback(name="cb2", callback=cb2), before="cb1")
+
+        # Try to register cb2 after cb1 (where cb1 is NOT in _callback_order)
+        with self.assertRaises(ValueError, msg="Reference callback not in callback order"):
+            self.broadcaster.register_callback(Callback(name="cb2", callback=cb2), after="cb1")
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+
+    async def test_reorder_callback_in_order_list_reference_not_in_order(self) -> None:
+        """Test that reorder_callback validates reference is in _callback_order (when callback is already in order)."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Register both callbacks normally
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+
+        # Manually remove cb2 from order list
+        self.broadcaster._callback_order.remove("cb2")  # type: ignore[reportPrivateUsage]
+
+        # Try to reorder cb1 (which IS in order) before cb2 (which is NOT in order)
+        with self.assertRaises(ValueError, msg="Reference callback not in callback order"):
+            self.broadcaster.reorder_callback("cb1", before="cb2")
+
+        # Try to reorder cb1 after cb2
+        with self.assertRaises(ValueError, msg="Reference callback not in callback order"):
+            self.broadcaster.reorder_callback("cb1", after="cb2")
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+
+    async def test_register_callback_validation_failure_preserves_order(self) -> None:
+        """Test Bug 1: register_callback validation failure should not remove callback from order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Register cb1 normally
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+
+        # Try to update cb1 with invalid before reference - should fail
+        with self.assertRaises(ValueError):
+            self.broadcaster.register_callback(Callback(name="cb1", callback=cb2), before="nonexistent")
+
+        # cb1 should still be in the order list
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1"])
+        self.assertIn("cb1", self.broadcaster._callbacks)  # type: ignore[reportPrivateUsage]
+
+        # Verify cb1 is still executed
+        call_order: list[str] = []
+
+        async def cb_test(item: str) -> None:
+            call_order.append("executed")
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb_test))
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["executed"])
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+
+    async def test_reorder_callback_validation_failure_preserves_order(self) -> None:
+        """Test Bug 1: reorder_callback validation failure should not remove callback from order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        # Register both callbacks
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        # Try to reorder cb1 with invalid before reference - should fail
+        with self.assertRaises(ValueError):
+            self.broadcaster.reorder_callback("cb1", before="nonexistent")
+
+        # cb1 should still be in the order list at original position
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        # Verify cb1 is still executed
+        call_order: list[str] = []
+
+        async def cb_test(item: str) -> None:
+            call_order.append("cb1")
+
+        async def cb2_test(item: str) -> None:
+            call_order.append("cb2")
+
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb_test))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2_test))
+        await self.stream.publish("test")
+        await asyncio.sleep(0.05)
+        self.assertEqual(call_order, ["cb1", "cb2"])
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+
+    async def test_register_callback_update_validation_failure_with_order_reference(self) -> None:
+        """Test Bug 1: updating callback with invalid order reference should preserve callback in order."""
+
+        async def cb1(item: str) -> None:
+            pass
+
+        async def cb2(item: str) -> None:
+            pass
+
+        async def cb3(item: str) -> None:
+            pass
+
+        # Register three callbacks
+        self.broadcaster.register_callback(Callback(name="cb1", callback=cb1))
+        self.broadcaster.register_callback(Callback(name="cb2", callback=cb2))
+        self.broadcaster.register_callback(Callback(name="cb3", callback=cb3))
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2", "cb3"])
+
+        # Manually remove cb3 from order to simulate edge case
+        self.broadcaster._callback_order.remove("cb3")  # type: ignore[reportPrivateUsage]
+
+        # Try to update cb2 to be before cb3 (which is not in order) - should fail
+        with self.assertRaises(ValueError, msg="Reference callback not in callback order"):
+            self.broadcaster.register_callback(Callback(name="cb2", callback=cb1), before="cb3")
+
+        # cb2 should still be in the order list at original position
+        self.assertEqual(self.broadcaster.get_callback_order(), ["cb1", "cb2"])
+
+        # Clean up
+        self.broadcaster.unregister_callback("cb1")
+        self.broadcaster.unregister_callback("cb2")
+        self.broadcaster.unregister_callback("cb3")
