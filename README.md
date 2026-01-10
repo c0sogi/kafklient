@@ -292,8 +292,6 @@ if __name__ == "__main__":
         producer_topic="mcp-responses",
         consumer_group_id="mcp-server",
         auto_create_topics=True,
-        # Default: multi_session=True (session isolation mode)
-        multi_session=True,
         show_banner=False,
         log_level="info",
     )
@@ -327,7 +325,7 @@ Useful flags:
 
 - `--consumer-topic`: topic to read responses/notifications from (default: `mcp-responses`)
 - `--producer-topic`: topic to write requests to (default: `mcp-requests`)
-- `--isolate-session` / `--no-isolate-session`: isolate sessions by filtering responses using `x-session-id` (default: true)
+- Session isolation is always enabled (responses are filtered using `x-session-id`).
 
 ## Development
 

@@ -29,7 +29,6 @@ async def kafka_client_session(
     consumer_topic: str = "mcp-responses",
     producer_topic: str = "mcp-requests",
     consumer_group_id: str | None = None,
-    isolate_session: bool = True,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
     read_timeout_seconds: timedelta | None = None,
@@ -54,22 +53,17 @@ async def kafka_client_session(
         consumer_topic: Response topic to consume from.
         producer_topic: Request topic to produce to.
         consumer_group_id: Consumer group id for the response consumer.
-        isolate_session: If True, filter responses by a per-session id to avoid mixing on shared topics.
         auto_create_topics: Best-effort topic creation.
         assignment_timeout_s: Kafka consumer assignment timeout.
         read_timeout_seconds: Optional MCP client read timeout.
         initialize: If True, call `session.initialize()` before yielding.
     """
 
-    session_id: bytes | None
-    if isolate_session:
-        # Keep this aligned with `run_client_async` behavior: a stable session id for filtering.
-        # Note: uuid4 is imported inside `kafka_client_transport` module; we avoid duplicating it here.
-        import uuid
+    # Always isolate sessions: filter responses by a per-session id to avoid mixing on shared topics.
+    # Keep this aligned with `run_client_async` behavior: a stable session id for filtering.
+    import uuid
 
-        session_id = uuid.uuid4().hex.encode("utf-8")
-    else:
-        session_id = None
+    session_id: bytes = uuid.uuid4().hex.encode("utf-8")
 
     async with kafka_client_transport(
         bootstrap_servers=bootstrap_servers,

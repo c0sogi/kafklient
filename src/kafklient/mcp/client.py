@@ -119,14 +119,13 @@ async def run_client_async(
     consumer_group_id: Optional[str] = None,
     consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
     producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
-    isolate_session: bool = True,
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
 ) -> None:
-    # In session isolation mode, responses are filtered by per-bridge session_id.
+    # Always isolate sessions: responses are filtered by per-bridge session_id.
     # This provides logical isolation even when using a shared response topic (e.g. mcp-responses).
-    session_id: bytes | None = uuid4().hex.encode("utf-8") if isolate_session else None
-    logger.debug(f"Session ID: {session_id.decode('utf-8', errors='replace') if session_id else '<none>'}")
+    session_id: bytes = uuid4().hex.encode("utf-8")
+    logger.debug("Session ID: %s", session_id.decode("utf-8", errors="replace"))
 
     async with stdio_server() as (stdio_read, stdio_write):
         async with kafka_client_transport(

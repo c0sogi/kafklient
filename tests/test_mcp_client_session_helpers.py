@@ -102,7 +102,6 @@ class TestMcpClientSessionHelpers(unittest.IsolatedAsyncioTestCase):
                         auto_create_topics=True,
                         show_banner=False,
                         log_level="error",
-                        multi_session=True,
                     )
                 )
 
@@ -114,7 +113,6 @@ class TestMcpClientSessionHelpers(unittest.IsolatedAsyncioTestCase):
                         consumer_topic=res_topic,
                         producer_topic=req_topic,
                         consumer_group_id=client_group_id,
-                        isolate_session=True,
                         auto_create_topics=True,
                         assignment_timeout_s=5.0,
                         read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),

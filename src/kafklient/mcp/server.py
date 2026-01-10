@@ -1,23 +1,20 @@
 import asyncio
 import logging
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import Callable, Iterable, Literal, cast
 from uuid import uuid4
 
 import anyio
-import fastmcp
-import mcp.server
-import mcp.types as mcp_types
 from anyio import EndOfStream
 from anyio.abc import TaskGroup
 from anyio.lowlevel import checkpoint
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from fastmcp.server.tasks.capabilities import get_task_capabilities
+from fastmcp import FastMCP as ExternalFastMCP
 from fastmcp.utilities.logging import temporary_log_level
-from mcp.server.lowlevel.server import NotificationOptions
+from mcp.server import FastMCP as McpFastMCP
 from mcp.shared.message import SessionMessage
-from mcp.types import JSONRPCMessage, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse
+from mcp.types import JSONRPCMessage, PromptsCapability, ResourcesCapability, ToolsCapability
 from rich.align import Align
 from rich.console import Console, Group
 from rich.panel import Panel
@@ -31,77 +28,21 @@ from kafklient.types.backend import Message as KafkaMessage
 from kafklient.types.config import ConsumerConfig, ProducerConfig
 from kafklient.types.parser import Parser
 
-Server = mcp.server.FastMCP | fastmcp.FastMCP
+Server = McpFastMCP | ExternalFastMCP
 
 logger = logging.getLogger(__name__)
 
-
-def _apply_advertise_overrides(
-    init_opts: "mcp.server.models.InitializationOptions",
-    *,
-    advertise_all_capabilities: bool,
-    advertise_resource_subscriptions: bool,
-    advertise_resources_list_changed: bool,
-) -> None:
-    """
-    Best-effort capability advertisement alignment for Kafka transport extras.
-
-    Notes:
-    - We can safely advertise `resources.subscribe` because the Kafka transport implements
-      subscribe/unsubscribe semantics itself.
-    - listChanged flags indicate the server *may* send notifications; they do not guarantee it will.
-    - We do not force-advertise request types like completions unless the underlying server registers them.
-    """
-
-    # Work on a copied capabilities model to ensure updates survive even if nested models
-    # are treated as immutable by some pydantic configs/versions.
-    caps = init_opts.capabilities.model_copy(deep=True)
-
-    # If the user wants "everything", treat it as turning on the common list-changed flags + logging capability.
-    if advertise_all_capabilities:
-        advertise_resource_subscriptions = True
-        advertise_resources_list_changed = True
-
-        # Prompts/tools listChanged is safe to advertise: it only affects notifications, not request handling.
-        if caps.prompts is None:
-            caps.prompts = mcp_types.PromptsCapability(listChanged=True)
-        else:
-            caps.prompts.listChanged = True
-
-        if caps.tools is None:
-            caps.tools = mcp_types.ToolsCapability(listChanged=True)
-        else:
-            caps.tools.listChanged = True
-
-        # Logging capability is safe to advertise (server->client notifications), even if setLevel isn't supported.
-        if caps.logging is None:
-            caps.logging = mcp_types.LoggingCapability()
-
-    if advertise_resource_subscriptions or advertise_resources_list_changed:
-        if caps.resources is None:
-            caps.resources = mcp_types.ResourcesCapability(
-                subscribe=bool(advertise_resource_subscriptions),
-                listChanged=bool(advertise_resources_list_changed),
-            )
-        else:
-            if advertise_resource_subscriptions:
-                caps.resources.subscribe = True
-            if advertise_resources_list_changed:
-                caps.resources.listChanged = True
-
-    init_opts.capabilities = caps
+ExtraCapability = Literal["prompts_changed", "tools_changed", "resources_changed", "resources_updated"]
 
 
 def _get_lifespan_context(server: Server) -> AbstractAsyncContextManager[None]:
     # Some server implementations (external fastmcp) have a lifespan manager; keep behavior consistent.
     try:
-        from fastmcp import FastMCP
-
-        return (
-            server._lifespan_manager()  # pyright: ignore[reportPrivateUsage]
-            if isinstance(server, FastMCP)
-            else nullcontext()
-        )
+        lifespan_mgr = getattr(server, "_lifespan_manager", None)
+        if callable(lifespan_mgr):
+            mgr = cast(Callable[[], AbstractAsyncContextManager[None]], lifespan_mgr)
+            return mgr()  # pyright: ignore[reportPrivateUsage]
+        return nullcontext()
     except Exception:
         return nullcontext()
 
@@ -117,68 +58,7 @@ class _McpKafkaSession:
     write_stream_reader: MemoryObjectReceiveStream[SessionMessage]
     subscribed_resources: set[str]
     resource_subscriptions_enabled: bool
-
-
-@asynccontextmanager
-async def kafka_server_transport(
-    bootstrap_servers: str,
-    consumer_topic: str,
-    producer_topic: str,
-    *,
-    consumer_group_id: str | None = None,
-    ready_event: asyncio.Event | None = None,
-    auto_create_topics: bool = True,
-    assignment_timeout_s: float = 5.0,
-    consumer_config: ConsumerConfig = _config.DEFAULT_MCP_CONSUMER_CONFIG,
-    producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
-) -> AsyncIterator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]]]:
-    read_stream_writer, read_stream = anyio.create_memory_object_stream[SessionMessage](0)
-    write_stream, write_stream_reader = anyio.create_memory_object_stream[SessionMessage](0)
-
-    listener = KafkaListener(
-        parsers=[Parser[JSONRPCMessage](topics=[consumer_topic])],
-        consumer_config=consumer_config
-        | {
-            "bootstrap.servers": bootstrap_servers,
-            "group.id": consumer_group_id or f"mcp-server-{uuid4().hex}",
-        },
-        producer_config=producer_config | {"bootstrap.servers": bootstrap_servers},
-        auto_create_topics=auto_create_topics,
-        assignment_timeout_s=assignment_timeout_s,
-    )
-
-    # Ensure topics exist up-front (consumer subscription + producer output)
-    if auto_create_topics:
-        await listener.create_topics(consumer_topic, producer_topic)
-
-    async def kafka_reader():
-        try:
-            async with read_stream_writer:
-                stream = await listener.subscribe(JSONRPCMessage)
-                if ready_event is not None:
-                    ready_event.set()
-                async for msg in stream:
-                    await read_stream_writer.send(SessionMessage(msg))
-        except anyio.ClosedResourceError:
-            await checkpoint()
-        finally:
-            await listener.stop()
-
-    async def kafka_writer():
-        try:
-            async with write_stream_reader:
-                async for session_message in write_stream_reader:
-                    json_str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
-                    await listener.produce(producer_topic, json_str.encode("utf-8"))
-        except anyio.ClosedResourceError:
-            await checkpoint()
-        finally:
-            await listener.stop()
-
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(kafka_reader)
-        tg.start_soon(kafka_writer)
-        yield read_stream, write_stream
+    pending_resource_subscriptions: dict[str | int, tuple[str, str]]
 
 
 def log_server_banner(server: Server, *, bootstrap_servers: str, consumer_topic: str, producer_topic: str) -> None:
@@ -242,10 +122,8 @@ async def run_server_async(
     producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
     show_banner: bool = True,
     log_level: str | None = None,
-    multi_session: bool = True,
-    advertise_resource_subscriptions: bool = True,
-    advertise_resources_list_changed: bool = True,
-    advertise_all_capabilities: bool = False,
+    extra_capabilities: Iterable[ExtraCapability] | None = None,
+    experimental_capabilities: dict[str, dict[str, object]] | None = None,
 ) -> None:
     """Run the server using stdio transport.
 
@@ -266,77 +144,31 @@ async def run_server_async(
         mcp_server = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
 
         async with _get_lifespan_context(mcp):
-            # ---------------------------
-            # Single-session (legacy) mode
-            # ---------------------------
-            if not multi_session:
-                async with kafka_server_transport(
-                    bootstrap_servers=bootstrap_servers,
-                    consumer_topic=consumer_topic,
-                    producer_topic=producer_topic,
-                    consumer_group_id=consumer_group_id,
-                    ready_event=ready_event,
-                    auto_create_topics=auto_create_topics,
-                    assignment_timeout_s=assignment_timeout_s,
-                    consumer_config=consumer_config,
-                    producer_config=producer_config,
-                ) as (read_stream, write_stream):
-                    logger.info(f"Starting MCP server {mcp.name!r} with transport 'stdio' over Kafka")
-                    init_opts = mcp_server.create_initialization_options(
-                        notification_options=NotificationOptions(
-                            tools_changed=True,
-                            prompts_changed=advertise_all_capabilities,
-                            resources_changed=advertise_resources_list_changed or advertise_all_capabilities,
-                        ),
-                        experimental_capabilities=get_task_capabilities(),
-                    )
-                    _apply_advertise_overrides(
-                        init_opts,
-                        advertise_all_capabilities=advertise_all_capabilities,
-                        advertise_resource_subscriptions=advertise_resource_subscriptions,
-                        advertise_resources_list_changed=advertise_resources_list_changed,
-                    )
-                    logger.debug(
-                        "Advertised capabilities (single_session): prompts=%r tools=%r resources=%r logging=%r",
-                        init_opts.capabilities.prompts.model_dump() if init_opts.capabilities.prompts else None,
-                        init_opts.capabilities.tools.model_dump() if init_opts.capabilities.tools else None,
-                        init_opts.capabilities.resources.model_dump() if init_opts.capabilities.resources else None,
-                        init_opts.capabilities.logging.model_dump() if init_opts.capabilities.logging else None,
-                    )
-
-                    await mcp_server.run(read_stream, write_stream, init_opts)
-                return
-
-            # ---------------------------
-            # Multi-session (session isolation) mode
-            # ---------------------------
             # Core idea:
             # - The client attaches its "reply topic" via the x-reply-topic header on requests.
             # - The server creates and maintains an independent MCP ServerSession per reply-topic (session key).
             # - Each session's write_stream produces only to that reply-topic to avoid mixing responses/notifications.
 
-            init_opts = mcp_server.create_initialization_options(
-                notification_options=NotificationOptions(
-                    tools_changed=True,
-                    prompts_changed=advertise_all_capabilities,
-                    resources_changed=advertise_resources_list_changed or advertise_all_capabilities,
-                ),
-                experimental_capabilities=get_task_capabilities(),
-            )
-            _apply_advertise_overrides(
-                init_opts,
-                advertise_all_capabilities=advertise_all_capabilities,
-                advertise_resource_subscriptions=advertise_resource_subscriptions,
-                advertise_resources_list_changed=advertise_resources_list_changed,
-            )
-            logger.debug(
-                "Advertised capabilities (multi_session init, advertise_all_capabilities=%r): prompts=%r tools=%r resources=%r logging=%r",
-                advertise_all_capabilities,
-                init_opts.capabilities.prompts.model_dump() if init_opts.capabilities.prompts else None,
-                init_opts.capabilities.tools.model_dump() if init_opts.capabilities.tools else None,
-                init_opts.capabilities.resources.model_dump() if init_opts.capabilities.resources else None,
-                init_opts.capabilities.logging.model_dump() if init_opts.capabilities.logging else None,
-            )
+            init_opts = mcp_server.create_initialization_options(experimental_capabilities=experimental_capabilities)
+            if extra_capabilities:
+                for capability in extra_capabilities:
+                    match capability:
+                        case "prompts_changed":
+                            if init_opts.capabilities.prompts is None:
+                                init_opts.capabilities.prompts = PromptsCapability(listChanged=True)
+                            init_opts.capabilities.prompts.listChanged = True
+                        case "tools_changed":
+                            if init_opts.capabilities.tools is None:
+                                init_opts.capabilities.tools = ToolsCapability(listChanged=True)
+                            init_opts.capabilities.tools.listChanged = True
+                        case "resources_changed":
+                            if init_opts.capabilities.resources is None:
+                                init_opts.capabilities.resources = ResourcesCapability(listChanged=True)
+                            init_opts.capabilities.resources.listChanged = True
+                        case "resources_updated":
+                            if init_opts.capabilities.resources is None:
+                                init_opts.capabilities.resources = ResourcesCapability(subscribe=True)
+                            init_opts.capabilities.resources.subscribe = True
 
             listener = KafkaListener(
                 parsers=[Parser[KafkaMessage](topics=[consumer_topic])],
@@ -401,6 +233,7 @@ async def run_server_async(
                     write_stream_reader=write_stream_reader,
                     subscribed_resources=set(),
                     resource_subscriptions_enabled=False,
+                    pending_resource_subscriptions={},
                 )
                 sessions[session_key] = session
                 logger.info(
@@ -429,34 +262,6 @@ async def run_server_async(
                     try:
                         async with write_stream_reader:
                             async for session_message in write_stream_reader:
-                                # Implement resource subscription semantics at the transport layer:
-                                # only deliver notifications/resources/updated to sessions that subscribed.
-                                msg_root = session_message.message.root
-                                if isinstance(msg_root, JSONRPCNotification):
-                                    if msg_root.method == "notifications/resources/updated":
-                                        try:
-                                            params = msg_root.params or {}
-                                            uri_obj = params.get("uri")
-                                            uri_str = str(uri_obj) if uri_obj is not None else ""
-                                        except Exception:
-                                            uri_str = ""
-
-                                        if session.resource_subscriptions_enabled:
-                                            # Enforce subscription semantics:
-                                            # - if there are no active subscriptions: deliver nothing
-                                            # - otherwise deliver only matches
-                                            if not any(
-                                                uri_str == s or (uri_str.startswith(s) and s)
-                                                for s in session.subscribed_resources
-                                            ):
-                                                logger.debug(
-                                                    "Dropping resources/updated for %r (session_key=%r, subs=%r)",
-                                                    uri_str,
-                                                    session.session_key,
-                                                    sorted(session.subscribed_resources),
-                                                )
-                                                continue
-
                                 json_str = session_message.message.model_dump_json(by_alias=True, exclude_none=True)
                                 headers: list[tuple[str, str | bytes | None]] | None = (
                                     [(_config.MCP_SESSION_ID_HEADER_KEY, session.session_id)]
@@ -477,7 +282,7 @@ async def run_server_async(
                 tg.start_soon(pump_session_to_kafka)
                 return session
 
-            logger.info(f"Starting MCP server {mcp.name!r} with transport 'stdio' over Kafka (multi_session=True)")
+            logger.info(f"Starting MCP server {mcp.name!r} with transport 'stdio' over Kafka")
 
             try:
                 async with anyio.create_task_group() as tg:
@@ -492,9 +297,9 @@ async def run_server_async(
                             session_id: bytes | None = extract_session_id(record)
                             # NOTE:
                             # If session_id (e.g. a bridge instance UUID) and reply_topic (string) share the same
-                            # namespace, collisions are possible. For example, if isolate_session=False and a client
-                            # uses a reply_topic string that happens to match another client's session_id string,
-                            # the sessions could be merged. We prevent this by separating the key namespaces.
+                            # namespace, collisions are possible. For example, if a client uses a reply_topic string
+                            # that happens to match another client's session_id string, sessions could be merged.
+                            # We prevent this by separating the key namespaces.
                             if session_id is not None:
                                 session_key: str = f"sid:{session_id.decode('utf-8', errors='replace')}"
                             else:
@@ -509,54 +314,6 @@ async def run_server_async(
                                 session_id=session_id,
                                 tg=tg,
                             )
-
-                            # Transport-level handling for resource subscriptions:
-                            # FastMCP does not necessarily register handlers for resources/subscribe,
-                            # but clients may still use it. We:
-                            # - track per-session subscriptions
-                            # - return an EmptyResult response
-                            # - optionally filter outgoing resource-updated notifications
-                            msg_root = msg.root
-                            if isinstance(msg_root, JSONRPCRequest) and msg_root.method in {
-                                "resources/subscribe",
-                                "resources/unsubscribe",
-                            }:
-                                session.resource_subscriptions_enabled = True
-                                params = msg_root.params or {}
-                                uri_obj = params.get("uri")
-                                uri_str = str(uri_obj) if uri_obj is not None else ""
-                                if msg_root.method == "resources/subscribe":
-                                    if uri_str:
-                                        logger.debug(
-                                            "resources/subscribe %r (session_key=%r)",
-                                            uri_str,
-                                            session.session_key,
-                                        )
-                                        session.subscribed_resources.add(uri_str)
-                                else:
-                                    if uri_str:
-                                        logger.debug(
-                                            "resources/unsubscribe %r (session_key=%r)",
-                                            uri_str,
-                                            session.session_key,
-                                        )
-                                        session.subscribed_resources.discard(uri_str)
-
-                                jsonrpc_response = JSONRPCResponse(jsonrpc="2.0", id=msg_root.id, result={})
-                                response_msg = JSONRPCMessage(jsonrpc_response).model_dump_json(
-                                    by_alias=True, exclude_none=True
-                                )
-                                headers: list[tuple[str, str | bytes | None]] | None = (
-                                    [(_config.MCP_SESSION_ID_HEADER_KEY, session.session_id)]
-                                    if session.session_id is not None
-                                    else None
-                                )
-                                await listener.produce(
-                                    session.target_topic,
-                                    response_msg.encode("utf-8"),
-                                    headers=headers,
-                                )
-                                continue
 
                             try:
                                 await session.read_stream_writer.send(SessionMessage(msg))
@@ -605,10 +362,8 @@ def run_server(
     producer_config: ProducerConfig = _config.DEFAULT_MCP_PRODUCER_CONFIG,
     show_banner: bool = True,
     log_level: str | None = None,
-    multi_session: bool = True,
-    advertise_resource_subscriptions: bool = True,
-    advertise_resources_list_changed: bool = True,
-    advertise_all_capabilities: bool = False,
+    extra_capabilities: Iterable[ExtraCapability] | None = None,
+    experimental_capabilities: dict[str, dict[str, object]] | None = None,
 ) -> None:
     return asyncio.run(
         run_server_async(
@@ -624,9 +379,7 @@ def run_server(
             producer_config=producer_config,
             show_banner=show_banner,
             log_level=log_level,
-            multi_session=multi_session,
-            advertise_resource_subscriptions=advertise_resource_subscriptions,
-            advertise_resources_list_changed=advertise_resources_list_changed,
-            advertise_all_capabilities=advertise_all_capabilities,
+            experimental_capabilities=experimental_capabilities,
+            extra_capabilities=extra_capabilities,
         )
     )

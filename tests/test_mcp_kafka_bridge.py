@@ -98,7 +98,6 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                         auto_create_topics=True,
                         show_banner=False,
                         log_level="error",
-                        multi_session=True,
                     )
                 )
 
@@ -212,7 +211,6 @@ class TestMCPKafkaBridge(unittest.IsolatedAsyncioTestCase):
                         auto_create_topics=True,
                         show_banner=False,
                         log_level="error",
-                        multi_session=True,
                     )
                 )
 

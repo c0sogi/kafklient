@@ -26,7 +26,7 @@ def mcp_client(
         help=(
             "Kafka topic to read responses/notifications from. "
             "If omitted, uses $KAFKLIENT_MCP_CONSUMER_TOPIC or 'mcp-responses'. "
-            "When session isolation is enabled, messages are filtered by the 'x-session-id' header."
+            "Messages are filtered by the 'x-session-id' header for session isolation."
         ),
     ),
     producer_topic: str = typer.Option(
@@ -44,15 +44,6 @@ def mcp_client(
         envvar="KAFKLIENT_MCP_CONSUMER_GROUP_ID",
         help="Kafka consumer group id for the response consumer (default: auto-generated)",
         show_default=False,
-    ),
-    isolate_session: bool = typer.Option(
-        os.getenv("KAFKLIENT_MCP_ISOLATE_SESSION", "true").strip().lower() not in {"0", "false", "no"},
-        "--isolate-session/--no-isolate-session",
-        help=(
-            "Enable session isolation (default: true). "
-            "When enabled and --consumer-topic is not provided, an instance-unique response topic is used."
-        ),
-        show_default=True,
     ),
     consumer_config: list[str] = typer.Option(
         [],
@@ -127,7 +118,6 @@ def mcp_client(
             consumer_group_id=consumer_group_id,
             consumer_config=parsed_consumer_config,
             producer_config=parsed_producer_config,
-            isolate_session=isolate_session,
         )
     )
 
@@ -221,12 +211,6 @@ def mcp_server(
         help="Log level for the server (overrides default temporarily)",
         show_default=False,
     ),
-    multi_session: bool = typer.Option(
-        True,
-        "--multi-session/--single-session",
-        help="Enable multi-session (session isolation) mode",
-        show_default=True,
-    ),
 ) -> None:
     """Run a FastMCP server over Kafka (stdio transport bridged to Kafka)."""
 
@@ -240,7 +224,13 @@ def mcp_server(
         param_hint: str | None,
     ) -> Server:
         def is_server_instance(obj: object) -> TypeGuard[Server]:
-            return isinstance(obj, Server)
+            # `Server` is a typing union; `isinstance(x, Server)` is invalid at runtime.
+            try:
+                from fastmcp import FastMCP as ExternalFastMCP
+                from mcp.server import FastMCP as McpFastMCP
+            except Exception:
+                return False
+            return isinstance(obj, (McpFastMCP, ExternalFastMCP))
 
         maybe_mcp: object = load_object_from_spec(
             spec,
@@ -289,5 +279,4 @@ def mcp_server(
         producer_config=parsed_producer_config,
         show_banner=show_banner,
         log_level=log_level,
-        multi_session=multi_session,
     )

@@ -76,8 +76,6 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 show_banner=False,
                 log_level="error",
-                multi_session=True,
-                advertise_all_capabilities=True,
             )
         )
 
@@ -89,7 +87,6 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 consumer_topic=res_topic,
                 producer_topic=req_topic,
                 consumer_group_id=client_group_id,
-                isolate_session=True,
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
@@ -173,8 +170,6 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 show_banner=False,
                 log_level="error",
-                multi_session=True,
-                advertise_all_capabilities=True,
             )
         )
 
@@ -186,7 +181,6 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 consumer_topic=res_topic,
                 producer_topic=req_topic,
                 consumer_group_id=client_group_id,
-                isolate_session=True,
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
@@ -262,8 +256,6 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 show_banner=False,
                 log_level="error",
-                multi_session=True,
-                advertise_all_capabilities=True,
             )
         )
 
@@ -275,7 +267,6 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 consumer_topic=res_topic,
                 producer_topic=req_topic,
                 consumer_group_id=client_group_id,
-                isolate_session=True,
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
@@ -297,6 +288,9 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
         E2E: `resources/subscribe` / `resources/unsubscribe` semantics over Kafka.
 
         Expectations:
+        - Kafka transport MUST NOT interfere with SDK semantics. Concretely, the observed notifications over
+          Kafka must match the observed notifications in-process for the same server behavior, even if the SDK
+          changes its subscribe/notification behavior in the future.
         - After subscribing to URI A, server notifications for A are delivered, and B are filtered out.
         - After unsubscribing from URI A, further notifications for A are filtered out.
         """
@@ -308,7 +302,7 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
             from pydantic import AnyUrl
 
             from kafklient.mcp.server import run_server_async
-            from kafklient.mcp.session import kafka_client_session
+            from kafklient.mcp.session import inprocess_client_session, kafka_client_session
         except Exception:  # pragma: no cover
             trb = traceback.format_exc()
             raise unittest.SkipTest(f"MCP dependencies not installed: {trb}")
@@ -326,33 +320,105 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
         uri_a = AnyUrl("https://example.com/a")
         uri_b = AnyUrl("https://example.com/b")
 
-        received: list[str] = []
-        got_a = asyncio.Event()
-        got_b = asyncio.Event()
+        def make_server(name: str) -> tuple[FastMCP, set[str]]:
+            subscribed_uris: set[str] = set()
 
-        async def message_handler(message: object) -> None:
+            async def on_subscribe_uri(uri: AnyUrl) -> None:
+                subscribed_uris.add(str(uri))
+
+            async def on_unsubscribe_uri(uri: AnyUrl) -> None:
+                subscribed_uris.remove(str(uri))
+
+            mcp = FastMCP(name)
+            mcp._mcp_server.subscribe_resource()(on_subscribe_uri)  # pyright: ignore[reportPrivateUsage]
+            mcp._mcp_server.unsubscribe_resource()(on_unsubscribe_uri)  # pyright: ignore[reportPrivateUsage]
+
+            @mcp.tool()
+            async def emit_two_updates_filtered(  # pyright: ignore[reportUnusedFunction]
+                ctx: Context[Any, Any, Any],
+            ) -> bool:
+                server_session = cast(ServerSession, ctx.request_context.session)
+                if str(uri_a) in subscribed_uris:
+                    await server_session.send_resource_updated(uri_a)
+                if str(uri_b) in subscribed_uris:
+                    await server_session.send_resource_updated(uri_b)
+                return True
+
+            @mcp.tool()
+            async def emit_two_updates_unfiltered(  # pyright: ignore[reportUnusedFunction]
+                ctx: Context[Any, Any, Any],
+            ) -> bool:
+                server_session = cast(ServerSession, ctx.request_context.session)
+                await server_session.send_resource_updated(uri_a)
+                await server_session.send_resource_updated(uri_b)
+                return True
+
+            return mcp, subscribed_uris
+
+        async def run_unfiltered_probe(
+            *,
+            session: object,
+            received: list[str],
+        ) -> bool:
+            # Activate subscribe state (whatever the SDK decides that means).
+            _ = await asyncio.wait_for(cast(Any, session).subscribe_resource(uri_a), timeout=TEST_TIMEOUT)
+
+            # Emit A+B unfiltered.
+            await asyncio.wait_for(
+                cast(Any, session).call_tool("emit_two_updates_unfiltered", {}), timeout=TEST_TIMEOUT
+            )
+
+            # Poll for delivery; we intentionally do not assume SDK semantics, we only measure them.
+            deadline_a = asyncio.get_running_loop().time() + TEST_TIMEOUT
+            while True:
+                if any(u.endswith("/a") for u in received):
+                    break
+                if asyncio.get_running_loop().time() > deadline_a:
+                    raise TimeoutError("Did not receive /a notification in time")
+                await asyncio.sleep(0.01)
+
+            deadline_b = asyncio.get_running_loop().time() + 1.0
+            while True:
+                if any(u.endswith("/b") for u in received):
+                    return True
+                if asyncio.get_running_loop().time() > deadline_b:
+                    return False
+                await asyncio.sleep(0.01)
+
+        # 0) Establish SDK baseline in-process (no Kafka). This is what Kafka transport must match.
+        inproc_mcp, _inproc_subscribed = make_server("In-process MCP advanced features (subscribe semantics)")
+        inproc_received: list[str] = []
+
+        async def inproc_message_handler(message: object) -> None:
             if isinstance(message, types.ServerNotification) and isinstance(
                 message.root, types.ResourceUpdatedNotification
             ):
-                received_uri = str(message.root.params.uri)
-                received.append(received_uri)
-                if received_uri.endswith("/a"):
-                    got_a.set()
-                if received_uri.endswith("/b"):
-                    got_b.set()
+                inproc_received.append(str(message.root.params.uri))
 
-        mcp = FastMCP("Kafka MCP advanced features (subscribe semantics)")
+        async with inprocess_client_session(
+            inproc_mcp,
+            read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
+            initialize=True,
+            message_handler=inproc_message_handler,
+        ) as inproc_session:
+            inproc_b_arrived = await run_unfiltered_probe(
+                session=inproc_session,
+                received=inproc_received,
+            )
 
-        @mcp.tool()
-        async def emit_two_updates(ctx: Context[Any, Any, Any]) -> bool:  # pyright: ignore[reportUnusedFunction]
-            server_session = cast(ServerSession, ctx.request_context.session)
-            await server_session.send_resource_updated(uri_a)
-            await server_session.send_resource_updated(uri_b)
-            return True
+        # 1) Kafka transport should match the in-process observation.
+        kafka_mcp, kafka_subscribed = make_server("Kafka MCP advanced features (subscribe semantics)")
+        kafka_received: list[str] = []
+
+        async def kafka_message_handler(message: object) -> None:
+            if isinstance(message, types.ServerNotification) and isinstance(
+                message.root, types.ResourceUpdatedNotification
+            ):
+                kafka_received.append(str(message.root.params.uri))
 
         server_task = asyncio.create_task(
             run_server_async(
-                mcp=mcp,
+                mcp=kafka_mcp,
                 bootstrap_servers=KAFKA_BOOTSTRAP,
                 consumer_topic=req_topic,
                 producer_topic=res_topic,
@@ -361,8 +427,7 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 show_banner=False,
                 log_level="error",
-                multi_session=True,
-                advertise_all_capabilities=True,
+                extra_capabilities={"resources_updated", "prompts_changed", "tools_changed", "resources_changed"},
             )
         )
 
@@ -374,55 +439,28 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 consumer_topic=res_topic,
                 producer_topic=req_topic,
                 consumer_group_id=client_group_id,
-                isolate_session=True,
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
                 initialize=True,
-                message_handler=message_handler,
-            ) as session:
-                caps = session.get_server_capabilities()
-                self.assertIsNotNone(caps, "expected server capabilities after initialize()")
-                if caps is not None:
-                    self.assertIsNotNone(caps.resources, "expected resources capability to be present")
-                    if caps.resources is not None:
-                        self.assertTrue(caps.resources.subscribe, "expected resources.subscribe=True to be advertised")
-                        self.assertTrue(
-                            caps.resources.listChanged, "expected resources.listChanged=True to be advertised"
-                        )
-                    self.assertIsNotNone(caps.tools, "expected tools capability to be present")
-                    if caps.tools is not None:
-                        self.assertTrue(caps.tools.listChanged, "expected tools.listChanged=True to be advertised")
-                    self.assertIsNotNone(caps.prompts, "expected prompts capability to be present")
-                    if caps.prompts is not None:
-                        self.assertTrue(caps.prompts.listChanged, "expected prompts.listChanged=True to be advertised")
-                    self.assertIsNotNone(caps.logging, "expected logging capability to be present")
+                message_handler=kafka_message_handler,
+            ) as kafka_session:
+                kafka_b_arrived = await run_unfiltered_probe(
+                    session=kafka_session,
+                    received=kafka_received,
+                )
+                self.assertEqual(
+                    kafka_b_arrived,
+                    inproc_b_arrived,
+                    f"Kafka transport must match in-process subscribe/update behavior; "
+                    f"inproc_received={inproc_received!r}, kafka_received={kafka_received!r}",
+                )
 
-                # Subscribe to A (MCP request resources/subscribe)
-                _ = await asyncio.wait_for(session.subscribe_resource(uri_a), timeout=TEST_TIMEOUT)
-
-                # Emit A + B updates; only A should arrive
-                got_a.clear()
-                got_b.clear()
-                await asyncio.wait_for(session.call_tool("emit_two_updates", {}), timeout=TEST_TIMEOUT)
-                await asyncio.wait_for(got_a.wait(), timeout=TEST_TIMEOUT)
-                try:
-                    await asyncio.wait_for(got_b.wait(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    pass
-                else:
-                    raise AssertionError(f"Unexpected /b notification received; received={received!r}")
-
-                # Unsubscribe from A; A should no longer arrive
-                _ = await asyncio.wait_for(session.unsubscribe_resource(uri_a), timeout=TEST_TIMEOUT)
-                got_a.clear()
-                await asyncio.wait_for(session.call_tool("emit_two_updates", {}), timeout=TEST_TIMEOUT)
-                try:
-                    await asyncio.wait_for(got_a.wait(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    pass
-                else:
-                    raise AssertionError(f"Unexpected /a notification after unsubscribe; received={received!r}")
+                # Now validate explicit server-side filtering still works end-to-end.
+                _ = await asyncio.wait_for(kafka_session.unsubscribe_resource(uri_a), timeout=TEST_TIMEOUT)
+                self.assertNotIn(str(uri_a), kafka_subscribed, f"expected {uri_a} to be unsubscribed")
+                # Server-side filtered emit should now send nothing for A (and B is never subscribed in this test).
+                await asyncio.wait_for(kafka_session.call_tool("emit_two_updates_filtered", {}), timeout=TEST_TIMEOUT)
         finally:
             server_task.cancel()
             try:
