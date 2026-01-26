@@ -110,11 +110,11 @@ async def benchmark_listener(iterations: int, warmup: int) -> BenchmarkResult:
             # Produce message with timestamp
             send_time = time.perf_counter()
 
-            def produce_one() -> None:
-                producer.produce(topic, value=json.dumps({"value": f"msg-{i}"}).encode())
-                producer.flush()
+            async def produce_one() -> None:
+                await producer.produce(topic, value=json.dumps({"value": f"msg-{i}"}).encode())
+                await producer.flush()
 
-            await asyncio.to_thread(produce_one)
+            await produce_one()
 
             # Receive message
             async def receive() -> SimpleRecord | None:

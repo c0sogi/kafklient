@@ -125,7 +125,7 @@ async def inprocess_client_session(
     mcp_server = server._mcp_server  # pyright: ignore[reportPrivateUsage]
     init_opts = mcp_server.create_initialization_options(
         notification_options=NotificationOptions(tools_changed=True),
-        experimental_capabilities=get_task_capabilities(),
+        experimental_capabilities=dict(get_task_capabilities()),
     )
 
     # Stream wiring:

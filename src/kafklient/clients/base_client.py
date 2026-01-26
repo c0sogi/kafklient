@@ -587,7 +587,7 @@ class KafkaBaseClient(ABC):
         partition: int | None = None,
         callback: Callable[[KafkaError | None, Message], None] | None = None,
         on_delivery: Callable[[KafkaError | None, Message], None] | None = None,
-        timestamp: int = 0,
+        timestamp: int | None = None,
         headers: dict[str, str | bytes | None] | list[tuple[str, str | bytes | None]] | None = None,
         flush: bool = False,
         flush_timeout: float | None = None,
@@ -595,12 +595,15 @@ class KafkaBaseClient(ABC):
         producer = await self.producer
 
         # Build kwargs for produce
+        # Note: AIOProducer batch mode does not support timestamp or headers
+        # If these are needed, consider using sync Producer with run_in_executor
         kwargs: dict[str, object] = {
             "topic": topic,
             "value": value,
             "key": key,
-            "timestamp": timestamp,
         }
+        if timestamp is not None:
+            kwargs["timestamp"] = timestamp
         if headers is not None:
             kwargs["headers"] = headers
         if partition is not None:
