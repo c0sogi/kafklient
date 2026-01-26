@@ -22,6 +22,7 @@ from confluent_kafka import (
     TopicPartition,
 )
 from confluent_kafka.admin import AdminClient, ClusterMetadata, NewTopic  # pyright: ignore[reportPrivateImportUsage]
+from confluent_kafka.aio import AIOConsumer, AIOProducer
 
 
 def get_error_code(name: str) -> int | None:
@@ -36,6 +37,8 @@ KAFKA_ERROR_PARTITION_EOF = get_error_code("_PARTITION_EOF")
 __all__ = [
     "Consumer",
     "Producer",
+    "AIOConsumer",
+    "AIOProducer",
     "KafkaError",
     "Message",
     "OFFSET_END",

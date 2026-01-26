@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from logging import getLogger
 from typing import Awaitable, Callable, Literal, Optional, Type, TypeVar, Union, override
 
-from ..types import KafkaError, Producer
-from ..types.backend import KafkaException, Message, TopicPartition
+from ..types.backend import AIOProducer, Message, TopicPartition
 from ..utils.task import Waiter
 from .base_client import KafkaBaseClient, PartitionListener
 
@@ -130,36 +129,21 @@ class KafkaRPC(KafkaBaseClient):
 
     async def _produce_request(
         self,
-        producer: Producer,
+        producer: AIOProducer,
         *,
         topic: str,
         value: bytes,
         key: Optional[bytes],
         headers: list[tuple[str, str | bytes | None]] | None,
     ) -> None:
-        loop = asyncio.get_running_loop()
-        delivery_future: asyncio.Future[Message | None] = loop.create_future()
-
-        def _on_delivery(err: Optional[KafkaError], msg: Message) -> None:
-            if err:
-                if not delivery_future.done():
-                    loop.call_soon_threadsafe(delivery_future.set_exception, KafkaException(err))
-            else:
-                if not delivery_future.done():
-                    loop.call_soon_threadsafe(delivery_future.set_result, msg)
-
-        def _produce_and_flush() -> None:
-            producer.produce(
-                topic,
-                value=value,
-                key=key,
-                headers=headers,
-                on_delivery=_on_delivery,
-            )
-            producer.flush()
-
-        await self._producer_executor.run(_produce_and_flush)
-        await delivery_future
+        # Native async produce with AIOProducer
+        await producer.produce(
+            topic=topic,
+            value=value,
+            key=key,
+            headers=headers,
+        )
+        await producer.flush()
 
     async def _on_record(
         self,
@@ -194,7 +178,6 @@ class KafkaRPC(KafkaBaseClient):
             if not w.future.done():
                 w.future.set_exception(RuntimeError("Client stopped before response"))
         self.waiters.clear()
-        self._consumer_ready = False
 
 
 @dataclass
@@ -329,24 +312,13 @@ class KafkaRPCServer(KafkaBaseClient):
 
     async def _produce_response(
         self,
-        producer: Producer,
+        producer: AIOProducer,
         *,
         topic: str,
         value: bytes,
         correlation_id: Optional[bytes],
     ) -> None:
         """Produce response message with correlation ID."""
-        loop = asyncio.get_running_loop()
-        delivery_future: asyncio.Future[Message | None] = loop.create_future()
-
-        def _on_delivery(err: Optional[KafkaError], msg: Message) -> None:
-            if err:
-                if not delivery_future.done():
-                    loop.call_soon_threadsafe(delivery_future.set_exception, KafkaException(err))
-            else:
-                if not delivery_future.done():
-                    loop.call_soon_threadsafe(delivery_future.set_result, msg)
-
         # Build key and headers based on propagate_corr_to setting
         msg_key: Optional[bytes] = None
         msg_headers: list[tuple[str, str | bytes | None]] = []
@@ -357,18 +329,14 @@ class KafkaRPCServer(KafkaBaseClient):
             if self.propagate_corr_to == "header" or self.propagate_corr_to == "both":
                 msg_headers.append((self.correlation_header_key, correlation_id))
 
-        def _produce_and_flush() -> None:
-            producer.produce(
-                topic,
-                value=value,
-                key=msg_key,
-                headers=msg_headers if msg_headers else None,
-                on_delivery=_on_delivery,
-            )
-            producer.flush()
-
-        await self._producer_executor.run(_produce_and_flush)
-        await delivery_future
+        # Native async produce with AIOProducer
+        await producer.produce(
+            topic=topic,
+            value=value,
+            key=msg_key,
+            headers=msg_headers if msg_headers else None,
+        )
+        await producer.flush()
 
     async def _on_stop_cleanup(self) -> None:
         """Cleanup on server stop."""

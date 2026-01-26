@@ -2,6 +2,8 @@ from .backend import (
     KAFKA_ERROR_PARTITION_EOF,
     OFFSET_END,
     AdminClient,
+    AIOConsumer,
+    AIOProducer,
     ClusterMetadata,  # pyright: ignore[reportPrivateImportUsage]
     Consumer,
     KafkaError,
@@ -17,8 +19,10 @@ from .parser import CorrelationCallback, Parser
 __all__ = [
     "ClusterMetadata",
     "Consumer",
+    "AIOConsumer",
     "CorrelationCallback",
     "Producer",
+    "AIOProducer",
     "KafkaError",
     "Message",
     "OFFSET_END",
