@@ -1,7 +1,8 @@
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import AsyncIterator
+from typing import AsyncGenerator
 
 import anyio
 import mcp.types as types
@@ -17,7 +18,8 @@ from mcp.client.session import (
 from mcp.shared.message import SessionMessage
 
 from kafklient.mcp.client import kafka_client_transport
-from kafklient.mcp.server import Server
+
+from .server import Server
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,6 @@ async def kafka_client_session(
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
     read_timeout_seconds: timedelta | None = None,
-    initialize: bool = True,
     sampling_callback: SamplingFnT | None = None,
     elicitation_callback: ElicitationFnT | None = None,
     list_roots_callback: ListRootsFnT | None = None,
@@ -40,7 +41,8 @@ async def kafka_client_session(
     message_handler: MessageHandlerFnT | None = None,
     client_info: types.Implementation | None = None,
     sampling_capabilities: types.SamplingCapability | None = None,
-) -> AsyncIterator[ClientSession]:
+    session_id: bytes | None = None,
+) -> AsyncGenerator[ClientSession, None]:
     """
     Create an MCP `ClientSession` that communicates over Kafka topics (no subprocess/stdio bridge needed).
 
@@ -56,14 +58,18 @@ async def kafka_client_session(
         auto_create_topics: Best-effort topic creation.
         assignment_timeout_s: Kafka consumer assignment timeout.
         read_timeout_seconds: Optional MCP client read timeout.
-        initialize: If True, call `session.initialize()` before yielding.
+        sampling_callback: Optional sampling callback.
+        elicitation_callback: Optional elicitation callback.
+        list_roots_callback: Optional list roots callback.
+        logging_callback: Optional logging callback.
+        message_handler: Optional message handler callback.
+        client_info: Optional client implementation info.
+        sampling_capabilities: Optional sampling capabilities.
+        session_id: Optional session id.
     """
 
-    # Always isolate sessions: filter responses by a per-session id to avoid mixing on shared topics.
-    # Keep this aligned with `run_client_async` behavior: a stable session id for filtering.
-    import uuid
-
-    session_id: bytes = uuid.uuid4().hex.encode("utf-8")
+    if session_id is None:
+        session_id = uuid.uuid4().bytes
 
     async with kafka_client_transport(
         bootstrap_servers=bootstrap_servers,
@@ -86,8 +92,6 @@ async def kafka_client_session(
             client_info=client_info,
             sampling_capabilities=sampling_capabilities,
         ) as session:
-            if initialize:
-                await session.initialize()
             yield session
 
 
@@ -96,7 +100,6 @@ async def inprocess_client_session(
     server: Server,
     *,
     read_timeout_seconds: timedelta | None = None,
-    initialize: bool = True,
     sampling_callback: SamplingFnT | None = None,
     elicitation_callback: ElicitationFnT | None = None,
     list_roots_callback: ListRootsFnT | None = None,
@@ -104,12 +107,26 @@ async def inprocess_client_session(
     message_handler: MessageHandlerFnT | None = None,
     client_info: types.Implementation | None = None,
     sampling_capabilities: types.SamplingCapability | None = None,
-) -> AsyncIterator[ClientSession]:
+) -> AsyncGenerator[ClientSession, None]:
     """
     Create an MCP `ClientSession` connected to a Python-native server instance in-process.
 
     This avoids stringly-typed subprocess configs (`StdioServerParameters`) entirely by wiring the
     client/server streams directly.
+
+    Args:
+        server: MCP server instance to connect to.
+        read_timeout_seconds: Optional MCP client read timeout.
+        sampling_callback: Optional sampling callback.
+        elicitation_callback: Optional elicitation callback.
+        list_roots_callback: Optional list roots callback.
+        logging_callback: Optional logging callback.
+        message_handler: Optional message handler callback.
+        client_info: Optional client implementation info.
+        sampling_capabilities: Optional sampling capabilities.
+
+    Yields:
+        An MCP client session connected to the provided server.
     """
 
     try:
@@ -121,24 +138,28 @@ async def inprocess_client_session(
     except Exception as e:  # pragma: no cover
         raise RuntimeError("In-process MCP session requires MCP server dependencies. Install `kafklient[mcp]`.") from e
 
+    lowlevel_server = server._mcp_server  # pyright: ignore[reportPrivateUsage]
+
     # Mirror `run_server_async` init behavior (capabilities + notifications).
-    mcp_server = server._mcp_server  # pyright: ignore[reportPrivateUsage]
-    init_opts = mcp_server.create_initialization_options(
+    capabilities = get_task_capabilities()
+    if capabilities is not None:
+        capabilities = dict(capabilities)  # Convert from Pydantic model to plain dict for transport.
+    init_opts = lowlevel_server.create_initialization_options(
         notification_options=NotificationOptions(tools_changed=True),
-        experimental_capabilities=get_task_capabilities(),
+        experimental_capabilities=capabilities,
     )
 
     # Stream wiring:
     # - client writes -> server reads
-    # - server writes -> client reads
     c2s_send, c2s_recv = anyio.create_memory_object_stream[SessionMessage](0)
+    # - server writes -> client reads
     s2c_send, s2c_recv = anyio.create_memory_object_stream[SessionMessage](0)
 
     cancelled_exc = anyio.get_cancelled_exc_class()
 
     async def run_server_session() -> None:
         try:
-            await mcp_server.run(c2s_recv, s2c_send, init_opts)
+            await lowlevel_server.run(c2s_recv, s2c_send, init_opts)
         except cancelled_exc:
             await checkpoint()
         except BaseException:
@@ -167,8 +188,6 @@ async def inprocess_client_session(
                         client_info=client_info,
                         sampling_capabilities=sampling_capabilities,
                     ) as session:
-                        if initialize:
-                            await session.initialize()
                         yield session
                 finally:
                     # Ensure the background server task is stopped.

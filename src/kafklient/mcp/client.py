@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+from typing import AsyncGenerator, Optional
 from uuid import uuid4
 
 import anyio
@@ -10,12 +10,12 @@ from mcp.server.stdio import stdio_server
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
-from kafklient.clients.listener import KafkaListener
-from kafklient.mcp import _config
-from kafklient.mcp._utils import extract_header_bytes
-from kafklient.types.backend import Message as KafkaMessage
-from kafklient.types.config import ConsumerConfig, ProducerConfig
-from kafklient.types.parser import Parser
+from ..clients.listener import KafkaListener
+from ..types.backend import Message as KafkaMessage
+from ..types.config import ConsumerConfig, ProducerConfig
+from ..types.parser import Parser
+from . import _config
+from ._utils import extract_header_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ async def kafka_client_transport(
     auto_create_topics: bool = True,
     assignment_timeout_s: float = 5.0,
     session_id: bytes | None = None,
-) -> AsyncIterator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]]]:
+) -> AsyncGenerator[tuple[MemoryObjectReceiveStream[SessionMessage], MemoryObjectSendStream[SessionMessage]], None]:
     """
     Client transport: behaves in the opposite direction of the server.
     - Writes to Request Topic

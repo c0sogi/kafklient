@@ -84,7 +84,7 @@ def create_consumer(config: ConsumerConfig) -> Consumer:
         config["group.id"] = f"consumer-{uuid.uuid4().hex[:8]}"
     if "bootstrap.servers" not in config or not config["bootstrap.servers"]:
         raise ValueError("bootstrap.servers is required")
-    return Consumer(config)  # pyright: ignore[reportArgumentType]
+    return Consumer(dict(config))  # pyright: ignore[reportArgumentType]
 
 
 def create_producer(config: ProducerConfig) -> Producer:
@@ -93,7 +93,7 @@ def create_producer(config: ProducerConfig) -> Producer:
         raise ValueError("bootstrap.servers is required")
     if "client.id" not in config or not config["client.id"]:
         config["client.id"] = f"producer-{uuid.uuid4().hex[:8]}"
-    return Producer(config)  # pyright: ignore[reportArgumentType]
+    return Producer(dict(config))  # pyright: ignore[reportArgumentType]
 
 
 @dataclass(kw_only=True)

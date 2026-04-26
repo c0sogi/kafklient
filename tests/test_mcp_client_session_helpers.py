@@ -52,8 +52,8 @@ class TestMcpClientSessionHelpers(unittest.IsolatedAsyncioTestCase):
                 async with inprocess_client_session(
                     mcp,
                     read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-                    initialize=True,
                 ) as session:
+                    await session.initialize()
                     tools = await asyncio.wait_for(session.list_tools(), timeout=TEST_TIMEOUT)
                     tool_names = {t.name for t in tools.tools}
                     self.assertIn("add", tool_names)
@@ -116,8 +116,8 @@ class TestMcpClientSessionHelpers(unittest.IsolatedAsyncioTestCase):
                         auto_create_topics=True,
                         assignment_timeout_s=5.0,
                         read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-                        initialize=True,
                     ) as session:
+                        await session.initialize()
                         tools = await asyncio.wait_for(session.list_tools(), timeout=TEST_TIMEOUT)
                         tool_names = {t.name for t in tools.tools}
                         self.assertIn("add", tool_names)

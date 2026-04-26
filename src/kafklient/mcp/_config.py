@@ -1,4 +1,4 @@
-from kafklient.types.config import ConsumerConfig, ProducerConfig
+from ..types.config import ConsumerConfig, ProducerConfig
 
 MCP_REPLY_TOPIC_HEADER_KEY = "x-reply-topic"
 MCP_SESSION_ID_HEADER_KEY = "x-session-id"

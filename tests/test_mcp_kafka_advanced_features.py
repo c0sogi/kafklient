@@ -90,9 +90,9 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-                initialize=True,
                 elicitation_callback=elicitation_callback,
             ) as session:
+                await session.initialize()
                 result = await asyncio.wait_for(
                     session.call_tool("add_via_elicitation", {"default": 0}), timeout=TEST_TIMEOUT
                 )
@@ -184,9 +184,9 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-                initialize=True,
                 sampling_callback=sampling_callback,
             ) as session:
+                await session.initialize()
                 result = await asyncio.wait_for(session.call_tool("sample_once", {}), timeout=TEST_TIMEOUT)
                 self.assertFalse(result.isError, f"tool call failed: {result!r}")
                 text = "".join(c.text for c in result.content if isinstance(c, types.TextContent))
@@ -270,9 +270,9 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-                initialize=True,
                 message_handler=message_handler,
             ) as session:
+                await session.initialize()
                 result = await asyncio.wait_for(session.call_tool("trigger_resource_updated", {}), timeout=TEST_TIMEOUT)
                 self.assertFalse(result.isError, f"tool call failed: {result!r}")
                 await asyncio.wait_for(got_notification.wait(), timeout=TEST_TIMEOUT)
@@ -398,9 +398,9 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
         async with inprocess_client_session(
             inproc_mcp,
             read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-            initialize=True,
             message_handler=inproc_message_handler,
         ) as inproc_session:
+            await inproc_session.initialize()
             inproc_b_arrived = await run_unfiltered_probe(
                 session=inproc_session,
                 received=inproc_received,
@@ -442,9 +442,9 @@ class TestMcpKafkaAdvancedFeatures(unittest.IsolatedAsyncioTestCase):
                 auto_create_topics=True,
                 assignment_timeout_s=5.0,
                 read_timeout_seconds=timedelta(seconds=TEST_TIMEOUT),
-                initialize=True,
                 message_handler=kafka_message_handler,
             ) as kafka_session:
+                await kafka_session.initialize()
                 kafka_b_arrived = await run_unfiltered_probe(
                     session=kafka_session,
                     received=kafka_received,

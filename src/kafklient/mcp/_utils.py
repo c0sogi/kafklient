@@ -6,9 +6,9 @@ from pathlib import Path
 import typer
 from pydantic import TypeAdapter
 
-from kafklient.mcp import _config
-from kafklient.types.backend import Message as KafkaMessage
-from kafklient.types.config import ConsumerConfig, ProducerConfig
+from ..types.backend import Message as KafkaMessage
+from ..types.config import ConsumerConfig, ProducerConfig
+from . import _config
 
 
 def extract_header_bytes(record: KafkaMessage, header_key: str) -> bytes | None:

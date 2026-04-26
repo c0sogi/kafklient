@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
-from typing import Callable, Iterable, Literal, cast
+from typing import Callable, Iterable, Literal, Protocol, cast
 from uuid import uuid4
 
 import anyio
@@ -10,9 +10,8 @@ from anyio import EndOfStream
 from anyio.abc import TaskGroup
 from anyio.lowlevel import checkpoint
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from fastmcp import FastMCP as ExternalFastMCP
 from fastmcp.utilities.logging import temporary_log_level
-from mcp.server import FastMCP as McpFastMCP
+from mcp.server.lowlevel.server import Server as LowLevelServer
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage, PromptsCapability, ResourcesCapability, ToolsCapability
 from rich.align import Align
@@ -21,14 +20,17 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from kafklient.clients.listener import KafkaListener
-from kafklient.mcp import _config
-from kafklient.mcp._utils import extract_header_bytes, extract_session_id
-from kafklient.types.backend import Message as KafkaMessage
-from kafklient.types.config import ConsumerConfig, ProducerConfig
-from kafklient.types.parser import Parser
+from ..clients.listener import KafkaListener
+from ..types.backend import Message as KafkaMessage
+from ..types.config import ConsumerConfig, ProducerConfig
+from ..types.parser import Parser
+from . import _config
+from ._utils import extract_header_bytes, extract_session_id
 
-Server = McpFastMCP | ExternalFastMCP
+
+class Server(Protocol):
+    _mcp_server: LowLevelServer
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,9 @@ class _McpKafkaSession:
     pending_resource_subscriptions: dict[str | int, tuple[str, str]]
 
 
-def log_server_banner(server: Server, *, bootstrap_servers: str, consumer_topic: str, producer_topic: str) -> None:
+def log_server_banner(
+    server: LowLevelServer, *, bootstrap_servers: str, consumer_topic: str, producer_topic: str
+) -> None:
     """Creates and logs a formatted banner with server information and logo.
     Reference: https://github.com/jlowin/fastmcp/blob/main/src/fastmcp/utilities/cli.py
 
@@ -132,24 +136,25 @@ async def run_server_async(
         log_level: Log level for the server
     """
     # Display server banner
+    lowlevel_server = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
     if show_banner:
         log_server_banner(
-            server=mcp,
+            server=lowlevel_server,
             bootstrap_servers=bootstrap_servers,
             consumer_topic=consumer_topic,
             producer_topic=producer_topic,
         )
 
     with temporary_log_level(log_level):
-        mcp_server = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
-
         async with _get_lifespan_context(mcp):
             # Core idea:
             # - The client attaches its "reply topic" via the x-reply-topic header on requests.
             # - The server creates and maintains an independent MCP ServerSession per reply-topic (session key).
             # - Each session's write_stream produces only to that reply-topic to avoid mixing responses/notifications.
 
-            init_opts = mcp_server.create_initialization_options(experimental_capabilities=experimental_capabilities)
+            init_opts = lowlevel_server.create_initialization_options(
+                experimental_capabilities=experimental_capabilities
+            )
             if extra_capabilities:
                 for capability in extra_capabilities:
                     match capability:
@@ -245,7 +250,7 @@ async def run_server_async(
 
                 async def run_mcp_session() -> None:
                     try:
-                        await mcp_server.run(read_stream, write_stream, init_opts)
+                        await lowlevel_server.run(read_stream, write_stream, init_opts)
                     except cancelled_exc:
                         # Treat per-session cancellation as a normal shutdown path.
                         await checkpoint()
@@ -282,7 +287,7 @@ async def run_server_async(
                 tg.start_soon(pump_session_to_kafka)
                 return session
 
-            logger.info(f"Starting MCP server {mcp.name!r} with transport 'stdio' over Kafka")
+            logger.info(f"Starting MCP server {lowlevel_server.name!r} with transport 'stdio' over Kafka")
 
             try:
                 async with anyio.create_task_group() as tg:
