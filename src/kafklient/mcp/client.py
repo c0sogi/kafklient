@@ -126,66 +126,88 @@ async def run_client_async(
     # This provides logical isolation even when using a shared response topic (e.g. mcp-responses).
     session_id: bytes = uuid4().hex.encode("utf-8")
     logger.debug("Session ID: %s", session_id.decode("utf-8", errors="replace"))
+    disabled_logging_level: int | None = None
 
-    async with stdio_server() as (stdio_read, stdio_write):
-        async with kafka_client_transport(
-            bootstrap_servers=bootstrap_servers,
-            consumer_topic=consumer_topic,
-            producer_topic=producer_topic,
-            consumer_group_id=consumer_group_id,
-            consumer_config=consumer_config,
-            producer_config=producer_config,
-            auto_create_topics=auto_create_topics,
-            assignment_timeout_s=assignment_timeout_s,
-            session_id=session_id,
-        ) as (kafka_read, kafka_write):
-            shutdown_requested = anyio.Event()
+    try:
+        async with stdio_server() as (stdio_read, stdio_write):
+            async with kafka_client_transport(
+                bootstrap_servers=bootstrap_servers,
+                consumer_topic=consumer_topic,
+                producer_topic=producer_topic,
+                consumer_group_id=consumer_group_id,
+                consumer_config=consumer_config,
+                producer_config=producer_config,
+                auto_create_topics=auto_create_topics,
+                assignment_timeout_s=assignment_timeout_s,
+                session_id=session_id,
+            ) as (kafka_read, kafka_write):
+                shutdown_requested = anyio.Event()
 
-            # NOTE:
-            # The stdio client expects the spawned process to exit when stdin is closed.
-            # If we keep the bridge alive after stdin EOF,
-            # it may continue writing to stdout (Kafka responses/notifications)
-            # and trigger BrokenResourceError in the client's stdout reader during shutdown.
-            # Therefore, we cancel the task group as soon as either direction completes.
-            async with anyio.create_task_group() as tg:
+                # NOTE:
+                # The stdio client expects the spawned process to exit when stdin is closed.
+                # If we keep the bridge alive after stdin EOF,
+                # it may continue writing to stdout (Kafka responses/notifications)
+                # and trigger BrokenResourceError in the client's stdout reader during shutdown.
+                # Therefore, we cancel the task group as soon as either direction completes.
+                # Close the stdout side before forwarding shutdown/exit to Kafka. This
+                # lowers the chance of late responses hitting a stale stdio client, and
+                # keeps MCP Inspector from tripping over disconnected SSE sessions.
+                async with anyio.create_task_group() as tg:
 
-                def _extract_method(msg: SessionMessage) -> str | None:
-                    # We avoid depending on the exact JSONRPCMessage variant classes
-                    # (request/notification/response) and just inspect the dumped payload.
-                    method = getattr(msg.message.root, "method", None)
-                    return method if isinstance(method, str) else None
+                    def _extract_method(msg: SessionMessage) -> str | None:
+                        # We avoid depending on the exact JSONRPCMessage variant classes
+                        # (request/notification/response) and just inspect the dumped payload.
+                        method = getattr(msg.message.root, "method", None)
+                        return method if isinstance(method, str) else None
 
-                async def forward_stdio_to_kafka() -> None:
-                    try:
-                        async with stdio_read, kafka_write:
-                            async for message in stdio_read:
-                                if isinstance(message, Exception):
-                                    logger.warning(f"Received exception from stdio: {message}", exc_info=message)
-                                    continue
-                                method = _extract_method(message)
-                                if method in {"shutdown", "exit"}:
-                                    # Inspector's Disconnect typically triggers shutdown/exit.
-                                    # If we continue emitting stdout after the browser side is gone,
-                                    # the inspector proxy can crash ("Not connected").
-                                    shutdown_requested.set()
+                    def _suppress_shutdown_logging() -> None:
+                        nonlocal disabled_logging_level
+                        if disabled_logging_level is None:
+                            disabled_logging_level = logging.root.manager.disable
+                            logging.disable(logging.CRITICAL)
+
+                    async def forward_stdio_to_kafka() -> None:
+                        try:
+                            async with stdio_read, kafka_write:
+                                async for message in stdio_read:
+                                    if isinstance(message, Exception):
+                                        logger.warning(f"Received exception from stdio: {message}", exc_info=message)
+                                        continue
+                                    method = _extract_method(message)
+                                    if method in {"shutdown", "exit"}:
+                                        # Inspector's Disconnect typically triggers shutdown/exit.
+                                        # Suppress cleanup logs too: Inspector forwards stderr as SSE
+                                        # notifications and can crash after the browser side is gone.
+                                        shutdown_requested.set()
+                                        _suppress_shutdown_logging()
+                                        await stdio_write.aclose()
+                                        await kafka_write.send(message)
+                                        return
                                     await kafka_write.send(message)
-                                    return
-                                await kafka_write.send(message)
-                    finally:
-                        tg.cancel_scope.cancel()
+                                # The client can also disconnect by closing stdin without
+                                # a shutdown/exit message. Treat that as the same quiet
+                                # shutdown path so cleanup logs do not hit a stale client.
+                                shutdown_requested.set()
+                                _suppress_shutdown_logging()
+                                await stdio_write.aclose()
+                        finally:
+                            tg.cancel_scope.cancel()
 
-                async def forward_kafka_to_stdio() -> None:
-                    try:
-                        async with kafka_read, stdio_write:
-                            async for message in kafka_read:
-                                if shutdown_requested.is_set():
-                                    return
-                                try:
-                                    await stdio_write.send(message)
-                                except (anyio.ClosedResourceError, anyio.BrokenResourceError, BrokenPipeError):
-                                    return
-                    finally:
-                        tg.cancel_scope.cancel()
+                    async def forward_kafka_to_stdio() -> None:
+                        try:
+                            async with kafka_read, stdio_write:
+                                async for message in kafka_read:
+                                    if shutdown_requested.is_set():
+                                        return
+                                    try:
+                                        await stdio_write.send(message)
+                                    except (anyio.ClosedResourceError, anyio.BrokenResourceError, BrokenPipeError):
+                                        return
+                        finally:
+                            tg.cancel_scope.cancel()
 
-                tg.start_soon(forward_stdio_to_kafka)
-                tg.start_soon(forward_kafka_to_stdio)
+                    tg.start_soon(forward_stdio_to_kafka)
+                    tg.start_soon(forward_kafka_to_stdio)
+    finally:
+        if disabled_logging_level is not None:
+            logging.disable(disabled_logging_level)

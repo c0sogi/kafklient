@@ -327,6 +327,12 @@ Useful flags:
 - `--producer-topic`: topic to write requests to (default: `mcp-requests`)
 - Session isolation is always enabled (responses are filtered using `x-session-id`).
 
+For local MCP Inspector experiments against this checkout, run the bridge through `uv --directory`:
+
+```bash
+uv --directory C:/Projects/kafklient run kafklient mcp-client -b 127.0.0.1:9092
+```
+
 ## Development
 
 Lint/type-check:
