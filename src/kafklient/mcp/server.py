@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
-from typing import Callable, Iterable, Literal, Protocol, cast
+from typing import Any, Callable, Iterable, Literal, Protocol, cast
 from uuid import uuid4
 
 import anyio
@@ -29,7 +29,8 @@ from ._utils import extract_header_bytes, extract_session_id
 
 
 class Server(Protocol):
-    _mcp_server: LowLevelServer
+    @property
+    def _mcp_server(self) -> LowLevelServer[Any, Any]: ...
 
 
 logger = logging.getLogger(__name__)
